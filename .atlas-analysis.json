@@ -1,0 +1,111 @@
+{
+  "projectType": "frontend",
+  "projectName": "r2Vault",
+  "projectDescription": "A native macOS client for browsing, managing, and uploading files to Cloudflare R2",
+  "theme": "palm",
+  "primaryColor": "#F86936",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "guide/configuration",
+              "guide/browsing",
+              "guide/uploading",
+              "guide/menu-bar",
+              "guide/managing-files"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/file-browser",
+              "features/upload-system",
+              "features/menu-bar-widget",
+              "features/auto-updates"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developer Reference",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "dev/architecture",
+              "dev/project-structure",
+              "dev/tech-stack"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "dev/services/r2-upload-service",
+              "dev/services/r2-browse-service",
+              "dev/services/aws-v4-signer",
+              "dev/services/keychain-service",
+              "dev/services/menu-bar-manager",
+              "dev/services/update-service"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "dev/models/r2-credentials",
+              "dev/models/r2-object",
+              "dev/models/upload-task"
+            ]
+          },
+          {
+            "group": "Building",
+            "pages": [
+              "dev/building-from-source",
+              "dev/contributing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Finder-style file browser with breadcrumb navigation",
+    "Drag-and-drop file and folder uploads with concurrent progress tracking",
+    "Menu bar widget for instant file uploads and recent uploads access",
+    "Multiple R2 bucket support with bucket switcher",
+    "Presigned URL generation for secure file sharing",
+    "Auto-update system with in-app download and install",
+    "Quick Look preview integration",
+    "Recursive folder operations (delete all contents)",
+    "Automatic public URL copy to clipboard"
+  ],
+  "publicApiSurface": [
+    "R2UploadService.upload(fileURL:credentials:key:contentType:onProgress:)",
+    "R2UploadService.testConnection(credentials:)",
+    "R2BrowseService.listObjects(credentials:prefix:)",
+    "R2BrowseService.createFolder(credentials:folderKey:)",
+    "R2BrowseService.deleteObject(credentials:key:)",
+    "R2BrowseService.listAllKeys(credentials:prefix:)",
+    "AWSV4Signer.sign(request:credentials:payloadHash:date:)",
+    "AWSV4Signer.presignedURL(for:credentials:expiresIn:date:)",
+    "KeychainService.save(_:forKey:)",
+    "KeychainService.retrieve(forKey:)",
+    "MenuBarManager.init(viewModel:)",
+    "UpdateService.checkForUpdates()",
+    "R2Credentials.publicURL(forKey:)",
+    "R2Credentials.endpoint"
+  ]
+}
