@@ -1,0 +1,343 @@
+---
+title: Contributing
+description: Guidelines for contributing to r2Vault development
+---
+
+## Welcome Contributors!
+
+Thank you for your interest in contributing to r2Vault! This guide will help you get started with the development workflow, code style, and submission process.
+
+<Note>
+  r2Vault is an open-source macOS client for Cloudflare R2, built with Swift 6 and SwiftUI.
+</Note>
+
+## How to Contribute
+
+There are many ways to contribute to r2Vault:
+
+- **Report bugs** via [GitHub Issues](https://github.com/xaif/r2Vault/issues)
+- **Suggest features** or improvements
+- **Fix bugs** and submit pull requests
+- **Add new features** that enhance the user experience
+- **Improve documentation** and code comments
+- **Write tests** to increase code coverage
+
+## Development Workflow
+
+<Steps>
+  <Step title="Fork and clone">
+    Fork the repository on GitHub, then clone your fork:
+    
+    ```bash
+    git clone https://github.com/YOUR-USERNAME/r2Vault.git
+    cd r2Vault
+    ```
+  </Step>
+
+  <Step title="Create a branch">
+    Create a feature branch for your changes:
+    
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
+    
+    Use descriptive branch names:
+    - `feature/add-bucket-search`
+    - `fix/upload-progress-bug`
+    - `docs/update-readme`
+  </Step>
+
+  <Step title="Make your changes">
+    1. Open `Fiaxe.xcodeproj` in Xcode
+    2. Make your changes following the [code style guidelines](#code-style)
+    3. Test your changes thoroughly
+    4. Update documentation if needed
+  </Step>
+
+  <Step title="Commit your changes">
+    Write clear, descriptive commit messages:
+    
+    ```bash
+    git add .
+    git commit -m "Add bucket search functionality"
+    ```
+    
+    Good commit messages:
+    - Start with a verb (Add, Fix, Update, Remove)
+    - Keep the subject line under 50 characters
+    - Add details in the body if needed
+  </Step>
+
+  <Step title="Push and create a PR">
+    Push your branch and open a pull request:
+    
+    ```bash
+    git push origin feature/your-feature-name
+    ```
+    
+    Then visit [github.com/xaif/r2Vault](https://github.com/xaif/r2Vault) to create your pull request.
+  </Step>
+</Steps>
+
+## Code Style
+
+### Swift 6 Standards
+
+r2Vault follows Swift 6 conventions and leverages modern language features:
+
+- **Strict concurrency** enabled throughout the project
+- **@Observable** macro for reactive state management (no more `@Published`)
+- **async/await** for all asynchronous operations
+- **TaskGroup** for concurrent operations (uploads, deletions)
+- **MainActor** annotations where appropriate
+
+### SwiftUI Patterns
+
+**State Management:**
+```swift
+@Observable
+final class AppViewModel {
+    var browserObjects: [R2Object] = []
+    var uploadTasks: [FileUploadTask] = []
+    // ...
+}
+```
+
+**View Injection:**
+```swift
+.environment(viewModel)
+```
+
+**Async Operations:**
+```swift
+Task {
+    await uploadPendingTasks()
+}
+```
+
+### Code Organization
+
+Follow the existing project structure:
+
+```
+Fiaxe/
+├── Models/          # Data models (R2Object, UploadTask, etc.)
+├── Services/        # Business logic and API calls
+├── ViewModels/      # Observable view models
+└── Views/           # SwiftUI views
+```
+
+**Naming Conventions:**
+- Use descriptive names: `uploadSingleFile` not `upload1`
+- Follow Swift API design guidelines
+- Use camelCase for functions and variables
+- Use PascalCase for types and protocols
+
+**Comments:**
+- Add comments for complex logic
+- Use `// MARK: -` to organize code sections
+- Document public APIs with doc comments
+
+## Project Structure
+
+### Core Components
+
+<AccordionGroup>
+  <Accordion title="Models" icon="box">
+    - **R2Credentials.swift** — Bucket credential storage
+    - **R2Object.swift** — File/folder object model
+    - **UploadItem.swift** — Upload history item
+    - **UploadTask.swift** — Upload task with progress tracking
+  </Accordion>
+
+  <Accordion title="Services" icon="gear">
+    - **AWSV4Signer.swift** — S3-compatible request signing with CryptoKit
+    - **KeychainService.swift** — Secure credential persistence
+    - **MenuBarManager.swift** — NSStatusItem + NSPopover management
+    - **R2BrowseService.swift** — Bucket listing, delete, recursive operations
+    - **R2UploadService.swift** — File upload with progress streaming
+    - **ThumbnailCache.swift** — Memory + disk thumbnail cache
+    - **UpdateService.swift** — GitHub release update checker
+    - **UploadHistoryStore.swift** — Upload history persistence
+  </Accordion>
+
+  <Accordion title="ViewModels" icon="brain">
+    - **AppViewModel.swift** — Central application state using @Observable
+      - Browser navigation and state
+      - Upload queue management
+      - Credential management
+      - Update checking
+  </Accordion>
+
+  <Accordion title="Views" icon="window">
+    - **BrowserView.swift** — Main file browser (icon/list views)
+    - **MenuBarView.swift** — Menu bar popover UI
+    - **SettingsView.swift** — Credentials and preferences
+    - **UploadQueueView.swift** — Active uploads HUD
+    - **UploadHistoryView.swift** — Past uploads list
+  </Accordion>
+</AccordionGroup>
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **UI** | SwiftUI |
+| **Architecture** | MVVM with @Observable |
+| **Concurrency** | Swift async/await, TaskGroup |
+| **Authentication** | AWS Signature V4 (CryptoKit) |
+| **Networking** | URLSession |
+| **Storage** | UserDefaults, Keychain |
+| **Menu Bar** | AppKit NSStatusItem + NSPopover |
+
+## Testing
+
+### Manual Testing
+
+Before submitting a PR, test these key flows:
+
+<Tabs>
+  <Tab title="File Upload">
+    - Drag and drop files from Finder
+    - Upload via file picker button
+    - Upload folders recursively
+    - Cancel in-progress uploads
+    - Verify progress tracking
+    - Check public URL auto-copy
+  </Tab>
+  
+  <Tab title="File Browser">
+    - Navigate into folders
+    - Go back/forward in history
+    - Search and filter files
+    - Sort by name, size, date, kind
+    - Switch between icon and list views
+    - Quick Look preview (spacebar)
+  </Tab>
+  
+  <Tab title="File Management">
+    - Create new folders
+    - Delete files and folders
+    - Recursive folder deletion
+    - Batch delete multiple items
+    - Context menu actions
+  </Tab>
+  
+  <Tab title="Menu Bar">
+    - Drop files on menu bar icon
+    - View live upload progress
+    - Recent uploads list
+    - Copy link, download, delete actions
+    - Bucket switcher
+  </Tab>
+</Tabs>
+
+### Test Environments
+
+- **Development**: Test with a non-production R2 bucket
+- **Multiple buckets**: Verify bucket switching works correctly
+- **Large files**: Test upload progress with files >100MB
+- **Folders**: Test recursive upload of nested folder structures
+
+<Warning>
+  Always test with a development bucket. Never test deletions on production data.
+</Warning>
+
+## Submitting Pull Requests
+
+### PR Checklist
+
+Before submitting, ensure:
+
+- [ ] Code builds without warnings or errors
+- [ ] Changes have been manually tested
+- [ ] Code follows Swift 6 and SwiftUI patterns
+- [ ] No sensitive data (API keys, credentials) in code
+- [ ] Commit messages are clear and descriptive
+- [ ] PR description explains what and why
+
+### PR Description Template
+
+```markdown
+## What
+Brief description of the changes.
+
+## Why
+Why is this change needed? What problem does it solve?
+
+## How
+How does this implementation work?
+
+## Testing
+How did you test these changes?
+
+## Screenshots (if applicable)
+Add screenshots for UI changes.
+```
+
+### Review Process
+
+1. **Submit PR**: Create your pull request on GitHub
+2. **Automated checks**: GitHub Actions will build your changes
+3. **Code review**: Maintainers will review your code
+4. **Address feedback**: Make requested changes if needed
+5. **Merge**: Once approved, your PR will be merged
+
+## Areas for Contribution
+
+### High Priority
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="vial">
+    Add unit tests and UI tests to improve code coverage.
+  </Card>
+  <Card title="Performance" icon="gauge-high">
+    Optimize thumbnail caching and large file uploads.
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation">
+    Improve error messages and recovery flows.
+  </Card>
+  <Card title="Accessibility" icon="universal-access">
+    Add VoiceOver support and keyboard navigation.
+  </Card>
+</CardGroup>
+
+### Feature Ideas
+
+- **File preview**: In-app preview for more file types
+- **Batch operations**: Bulk rename, move, copy
+- **Search**: Advanced search with filters
+- **Sync**: Two-way sync between local and R2
+- **Sharing**: Generate presigned URLs with expiration
+- **Analytics**: Storage usage and bandwidth tracking
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/xaif/r2Vault">
+    View source code and submit issues
+  </Card>
+  <Card title="Building from Source" icon="hammer" href="/dev/building-from-source">
+    Build instructions and troubleshooting
+  </Card>
+  <Card title="Cloudflare R2 Docs" icon="cloud" href="https://developers.cloudflare.com/r2/">
+    R2 API reference and documentation
+  </Card>
+  <Card title="Swift Docs" icon="swift" href="https://docs.swift.org/swift-book/">
+    Swift language documentation
+  </Card>
+</CardGroup>
+
+## Questions?
+
+If you have questions or need help:
+
+- Open a [GitHub Discussion](https://github.com/xaif/r2Vault/discussions)
+- File an [Issue](https://github.com/xaif/r2Vault/issues) for bugs
+- Check existing issues and PRs for similar work
+
+## License
+
+r2Vault is open source under the [MIT License](https://github.com/xaif/r2Vault/blob/main/LICENSE).
+
+By contributing, you agree that your contributions will be licensed under the same license.

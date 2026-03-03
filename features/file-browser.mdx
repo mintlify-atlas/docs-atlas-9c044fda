@@ -1,0 +1,420 @@
+---
+title: File Browser
+description: Explore r2Vault's native Finder-style interface for browsing and managing your Cloudflare R2 bucket
+---
+
+The File Browser is the core interface of r2Vault, providing a native macOS experience for browsing, organizing, and managing files in your Cloudflare R2 bucket.
+
+## Finder-Style Interface
+
+r2Vault's browser is designed to feel like a natural extension of macOS Finder, with familiar navigation patterns and visual design.
+
+<CardGroup cols={2}>
+  <Card title="Path Bar Navigation" icon="arrow-right">
+    Breadcrumb-style path bar shows your current location in the bucket hierarchy
+  </Card>
+  <Card title="View Modes" icon="grid">
+    Switch between Icons and List views to match your workflow
+  </Card>
+  <Card title="Multi-Select" icon="check-square">
+    Select multiple files and folders for batch operations
+  </Card>
+  <Card title="Quick Actions" icon="bolt">
+    Context menus and keyboard shortcuts for fast file management
+  </Card>
+</CardGroup>
+
+## View Modes
+
+Switch between two view modes to match your workflow:
+
+### Icons View
+
+Grid layout with large file thumbnails, perfect for visual browsing of images and media files.
+
+```swift BrowserView.swift:154-192
+private var iconsView: some View {
+    ScrollView {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 120, maximum: 140), spacing: 12)],
+            spacing: 12
+        ) {
+            ForEach(viewModel.allBrowserItems) { item in
+                FinderIconCell(
+                    object: item,
+                    credentials: viewModel.credentials ?? .empty,
+                    isSelected: viewModel.selectedObjectIDs.contains(item.id)
+                )
+                .onTapGesture(count: 2) {
+                    if item.isFolder {
+                        viewModel.navigateToFolder(item)
+                    } else {
+                        QuickLookCoordinator.shared.preview(
+                            item,
+                            credentials: viewModel.credentials ?? .empty
+                        )
+                    }
+                }
+                .onTapGesture(count: 1) {
+                    toggleSelection(item)
+                }
+                .contextMenu { rowContextMenu(for: item) }
+            }
+        }
+        .padding(16)
+    }
+}
+```
+
+<Info>
+The icons view uses a lazy grid with adaptive columns that automatically adjust based on window size.
+</Info>
+
+### List View
+
+Compact list layout with sortable columns (Name, Kind, Size, Date Modified), ideal for browsing large folders.
+
+```swift BrowserView.swift:196-218
+private var listView: some View {
+    VStack(spacing: 0) {
+        listHeader
+        Divider()
+        List {
+            ForEach(viewModel.allBrowserItems) { item in
+                R2ObjectRow(
+                    object: item,
+                    credentials: viewModel.credentials ?? .empty,
+                    isSelected: viewModel.selectedObjectIDs.contains(item.id),
+                    onNavigate: { viewModel.navigateToFolder($0) },
+                    onCopyURL: { viewModel.copyToClipboard($0) },
+                    onPreview: { QuickLookCoordinator.shared.preview($0, credentials: viewModel.credentials ?? .empty) },
+                    onDownload: { viewModel.downloadToDestination(from: $0, dest: $1) },
+                    onDelete: { item in Task { await viewModel.deleteObject(item) } }
+                )
+                .onTapGesture { toggleSelection(item) }
+                .contextMenu { rowContextMenu(for: item) }
+            }
+        }
+        .listStyle(.inset)
+    }
+}
+```
+
+## Breadcrumb Navigation
+
+The path bar at the top of the browser shows your current location and allows instant navigation to any parent folder.
+
+```swift BrowserView.swift:82-112
+private var pathBar: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 2) {
+            pathCrumb(
+                label: viewModel.credentials?.bucketName ?? "Bucket",
+                systemImage: "externaldrive.fill",
+                isCurrent: viewModel.pathSegments.isEmpty
+            ) { viewModel.navigateToRoot() }
+
+            ForEach(Array(viewModel.pathSegments.enumerated()), id: \.offset) { idx, segment in
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                pathCrumb(
+                    label: segment,
+                    systemImage: "folder.fill",
+                    isCurrent: idx == viewModel.pathSegments.count - 1
+                ) { viewModel.navigateToSegment(idx) }
+            }
+        }
+        .padding(.horizontal, 14)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.pathSegments)
+    }
+    .frame(height: 30)
+    .background(.regularMaterial)
+}
+```
+
+<Tip>
+Click any folder name in the path bar to instantly jump to that location in your bucket.
+</Tip>
+
+## Search and Filtering
+
+The search bar in the toolbar provides real-time filtering of files and folders by name.
+
+```swift BrowserView.swift:40
+.searchable(text: $vm.filterText, placement: .toolbar, prompt: "Search")
+```
+
+Filtering logic is implemented in the view model:
+
+```swift AppViewModel.swift:100-131
+var allBrowserItems: [R2Object] {
+    let combined = browserFolders + browserObjects
+    let filtered: [R2Object]
+    if filterText.isEmpty {
+        filtered = combined
+    } else {
+        filtered = combined.filter { $0.name.localizedCaseInsensitiveContains(filterText) }
+    }
+    return filtered.sorted { a, b in
+        // Folders always sort before files when sorting by name/date/kind
+        if sortKey != .size && a.isFolder != b.isFolder {
+            return a.isFolder
+        }
+        let result: Bool
+        switch sortKey {
+        case .name:
+            result = a.name.localizedCompare(b.name) == .orderedAscending
+        case .size:
+            result = a.size < b.size
+        case .date:
+            let aDate = a.lastModified ?? .distantPast
+            let bDate = b.lastModified ?? .distantPast
+            result = aDate < bDate
+        case .kind:
+            result = a.isFolder == b.isFolder
+                ? a.name.localizedCompare(b.name) == .orderedAscending
+                : a.isFolder
+        }
+        return sortAscending ? result : !result
+    }
+}
+```
+
+## Quick Look Integration
+
+Double-click any file to instantly preview it using macOS Quick Look. No download required - files stream directly from R2 via presigned URLs.
+
+```swift QuickLookCoordinator.swift:27-45
+func preview(_ object: R2Object, credentials: R2Credentials) {
+    let panel = QLPreviewPanel.shared()!
+
+    // Toggle: if already visible for same coordinator, close it
+    if panel.isVisible && panel.dataSource === self {
+        panel.close()
+        return
+    }
+
+    // Generate a presigned URL and pass it directly to Quick Look — no download needed.
+    // previewItemTitle supplies the filename so QL picks the right previewer plugin.
+    guard let presignedURL = AWSV4Signer.presignedURL(for: object.key, credentials: credentials) else { return }
+    previewItem = PreviewItem(url: presignedURL, title: object.name)
+
+    panel.dataSource = self
+    panel.delegate  = self
+    panel.makeKeyAndOrderFront(nil)
+    panel.reloadData()
+}
+```
+
+<Check>
+Quick Look supports images, PDFs, videos, audio, documents, and most common file formats - all streaming directly from R2 without downloading to disk.
+</Check>
+
+## Drag and Drop Upload
+
+Drag files or folders from Finder directly into the browser window to upload them to the current folder.
+
+```swift BrowserView.swift:27-32
+mainContent
+    .dropDestination(for: URL.self) { urls, _ in
+        guard viewModel.hasCredentials else { return false }
+        viewModel.handleDroppedURLs(urls)
+        return true
+    } isTargeted: { isDropTargeted = $0 }
+```
+
+When files are dropped, the view model handles both individual files and folders recursively:
+
+```swift AppViewModel.swift:359-420
+func handleDroppedURLs(_ urls: [URL]) {
+    var tasks: [FileUploadTask] = []
+
+    for url in urls {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        guard exists else { continue }
+
+        if isDirectory.boolValue {
+            // Recursively enumerate directory contents
+            let dirName = url.lastPathComponent
+            let folderBookmark = try? url.bookmarkData(options: [.withSecurityScope],
+                                                     includingResourceValuesForKeys: nil,
+                                                     relativeTo: nil)
+            guard let enumerator = FileManager.default.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for case let fileURL as URL in enumerator {
+                // Process each file in the folder...
+                let relativePath = fileURL.path.replacingOccurrences(
+                    of: url.deletingLastPathComponent().path + "/",
+                    with: ""
+                )
+                let r2Key = currentPrefix + relativePath
+                let task = FileUploadTask(fileURL: fileURL, fileName: fileName, fileSize: fileSize)
+                task.uploadKey = r2Key
+                task.parentFolderBookmark = folderBookmark
+                tasks.append(task)
+            }
+        } else {
+            // Single file — upload into current prefix
+            let task = FileUploadTask(fileURL: url, fileName: fileName, fileSize: fileSize)
+            task.uploadKey = currentPrefix + fileName
+            tasks.append(task)
+        }
+    }
+
+    guard !tasks.isEmpty else { return }
+    uploadTasks.append(contentsOf: tasks)
+    Task { await uploadPendingTasks() }
+}
+```
+
+<Note>
+When you drag a folder, r2Vault preserves the complete folder structure in R2, including all subfolders and their contents.
+</Note>
+
+## Keyboard Shortcuts
+
+<AccordionGroup>
+  <Accordion title="Navigation">
+    - `⌘[` - Go back
+    - `⌘]` - Go forward
+    - `⌘↑` - Go to parent folder
+    - `Space` - Quick Look preview
+  </Accordion>
+  
+  <Accordion title="File Operations">
+    - `⌘N` - New folder
+    - `⌘O` - Upload files
+    - `Delete` - Delete selected items
+    - `⌘R` - Refresh current folder
+  </Accordion>
+  
+  <Accordion title="Selection">
+    - `⌘A` - Select all
+    - `⌘D` - Deselect all
+    - Click - Single selection
+    - `⌘Click` - Add to selection
+  </Accordion>
+</AccordionGroup>
+
+## Context Menus
+
+Right-click any file or folder to access quick actions:
+
+```swift BrowserView.swift:353-381
+@ViewBuilder
+private func rowContextMenu(for item: R2Object) -> some View {
+    if item.isFolder {
+        Button { viewModel.navigateToFolder(item) } label: {
+            Label("Open", systemImage: "arrow.right.circle")
+        }
+        Divider()
+    } else {
+        Button {
+            QuickLookCoordinator.shared.preview(item, credentials: viewModel.credentials ?? .empty)
+        } label: {
+            Label("Preview", systemImage: "eye")
+        }
+        Button {
+            let url = (viewModel.credentials ?? .empty).publicURL(forKey: item.key)
+            viewModel.copyToClipboard(url.absoluteString)
+        } label: {
+            Label("Copy URL", systemImage: "doc.on.clipboard")
+        }
+        Divider()
+    }
+    Button { viewModel.selectedObjectIDs.insert(item.id) } label: {
+        Label("Select", systemImage: "checkmark.circle")
+    }
+    Divider()
+    Button(role: .destructive) { pendingDeleteItem = item } label: {
+        Label(item.isFolder ? "Delete Folder & Contents" : "Delete", systemImage: "trash")
+    }
+}
+```
+
+<Warning>
+Deleting a folder will recursively delete all files and subfolders inside it. This action cannot be undone.
+</Warning>
+
+## Toolbar
+
+The browser toolbar provides quick access to common actions:
+
+<Steps>
+  <Step title="Back/Forward Buttons">
+    Navigate through your browsing history
+  </Step>
+  <Step title="View Mode Toggle">
+    Switch between Icons and List view
+  </Step>
+  <Step title="Upload Menu">
+    Upload files, upload folder, or create new folder
+  </Step>
+  <Step title="Refresh Button">
+    Reload the current folder contents
+  </Step>
+  <Step title="Sort Menu">
+    Sort by Name, Size, Date, or Kind
+  </Step>
+  <Step title="Selection Menu">
+    Select all, deselect, or delete selected items
+  </Step>
+</Steps>
+
+## Status Bar
+
+The status bar at the bottom shows the current selection state:
+
+```swift BrowserView.swift:322-349
+private var statusBar: some View {
+    let total = viewModel.allBrowserItems.count
+    let sel   = viewModel.selectedObjectIDs.count
+    return Group {
+        if total > 0 || sel > 0 {
+            HStack(spacing: 10) {
+                if sel > 0 {
+                    Text("\(sel) of \(total) selected").foregroundStyle(.secondary)
+                    Spacer()
+                    Button(role: .destructive) { showDeleteConfirm = true } label: {
+                        Label("Delete Selected", systemImage: "trash")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.red)
+                    Button { viewModel.clearSelection() } label: { Text("Deselect") }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                } else {
+                    Text("\(total) item\(total == 1 ? "" : "s")").foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+            .font(.caption)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        }
+    }
+}
+```
+
+<Info>
+The status bar only appears when there are items in the current folder or when items are selected.
+</Info>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Upload System" icon="cloud-arrow-up" href="/features/upload-system">
+    Learn about concurrent uploads and progress tracking
+  </Card>
+  <Card title="Menu Bar Widget" icon="square-terminal" href="/features/menu-bar-widget">
+    Quick uploads from anywhere on your Mac
+  </Card>
+</CardGroup>

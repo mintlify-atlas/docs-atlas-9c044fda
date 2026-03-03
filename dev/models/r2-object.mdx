@@ -1,0 +1,129 @@
+---
+title: 'R2Object'
+description: 'Represents a file or folder entry in an R2 bucket'
+---
+
+## Overview
+
+The `R2Object` struct represents a file or folder entry retrieved from a Cloudflare R2 bucket. It includes metadata like size, modification date, and provides computed properties for display formatting.
+
+## Properties
+
+<ResponseField name="id" type="UUID" computed>
+  Unique identifier automatically generated for each object
+</ResponseField>
+
+<ResponseField name="key" type="String" required>
+  The full path/key of the object in the R2 bucket. Folder keys end with a trailing slash `/`
+</ResponseField>
+
+<ResponseField name="size" type="Int64" required>
+  Size of the object in bytes. For folders, this is typically `0`
+</ResponseField>
+
+<ResponseField name="lastModified" type="Date?">
+  The last modification date of the object. May be `nil` for some objects
+</ResponseField>
+
+<ResponseField name="isFolder" type="Bool" required>
+  Flag indicating whether this object represents a folder (true) or file (false)
+</ResponseField>
+
+<ResponseField name="name" type="String" computed>
+  The display name derived from the key. Returns the last path component with trailing slashes stripped for folders.
+  
+  Examples:
+  - `"documents/report.pdf"` → `"report.pdf"`
+  - `"images/2024/"` → `"2024"`
+</ResponseField>
+
+<ResponseField name="formattedSize" type="String" computed>
+  Human-readable file size formatted using `ByteCountFormatter`. Folders display `"--"`
+  
+  Examples:
+  - `1024` → `"1 KB"`
+  - `1048576` → `"1 MB"`
+  - Folder → `"--"`
+</ResponseField>
+
+<ResponseField name="formattedDate" type="String" computed>
+  Human-readable last-modified date formatted with medium date and short time style. Returns `"--"` if `lastModified` is `nil`
+  
+  Example: `"Jan 15, 2024 at 3:45 PM"`
+</ResponseField>
+
+## Source Code
+
+```swift R2Object.swift
+import Foundation
+
+/// Represents a file or folder entry in the R2 bucket
+struct R2Object: Identifiable, Sendable {
+    let id = UUID()
+    let key: String
+    let size: Int64
+    let lastModified: Date?
+    let isFolder: Bool
+
+    /// The display name — last path component, strips trailing slash for folders
+    var name: String {
+        let stripped = key.hasSuffix("/") ? String(key.dropLast()) : key
+        return stripped.components(separatedBy: "/").last ?? stripped
+    }
+
+    /// Human-readable file size; folders show "--"
+    var formattedSize: String {
+        if isFolder { return "--" }
+        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    /// Human-readable last-modified date
+    var formattedDate: String {
+        guard let date = lastModified else { return "--" }
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt.string(from: date)
+    }
+}
+```
+
+## Protocols
+
+- `Identifiable` - Has a unique `id` property for use in SwiftUI lists
+- `Sendable` - Thread-safe value type that can be safely passed across concurrency boundaries
+
+## Usage Example
+
+```swift
+// File object
+let fileObject = R2Object(
+    key: "documents/report.pdf",
+    size: 2_457_600,
+    lastModified: Date(),
+    isFolder: false
+)
+
+print(fileObject.name)           // "report.pdf"
+print(fileObject.formattedSize)  // "2.5 MB"
+print(fileObject.isFolder)       // false
+
+// Folder object
+let folderObject = R2Object(
+    key: "images/2024/",
+    size: 0,
+    lastModified: nil,
+    isFolder: true
+)
+
+print(folderObject.name)          // "2024"
+print(folderObject.formattedSize) // "--"
+print(folderObject.isFolder)      // true
+```
+
+## Notes
+
+- Folder objects typically have a trailing `/` in their key
+- The `name` property intelligently handles both files and folders
+- All computed properties are designed for direct display in UI elements
+- The struct is optimized for use in SwiftUI `List` and `ForEach` views via `Identifiable`

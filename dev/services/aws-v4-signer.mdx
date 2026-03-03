@@ -1,0 +1,471 @@
+---
+title: "AWSV4Signer"
+description: "AWS Signature Version 4 signer for S3-compatible APIs (Cloudflare R2)"
+---
+
+## Overview
+
+`AWSV4Signer` implements AWS Signature Version 4 signing for S3-compatible APIs. This service signs HTTP requests with HMAC-SHA256 authentication, enabling secure access to Cloudflare R2 storage.
+
+<Info>
+  Located at: `Fiaxe/Services/AWSV4Signer.swift:6`
+</Info>
+
+## Type Definition
+
+```swift
+nonisolated enum AWSV4Signer
+```
+
+Implemented as a nonisolated enum to allow calling from any actor context without isolation restrictions.
+
+## Methods
+
+### sign()
+
+Signs a URLRequest with AWS Signature V4 and returns the signed request.
+
+```swift
+static func sign(
+    request: URLRequest,
+    credentials: R2Credentials,
+    payloadHash: String = "UNSIGNED-PAYLOAD",
+    date: Date = Date()
+) -> URLRequest
+```
+
+<ParamField path="request" type="URLRequest" required>
+  Request with url, httpMethod, and headers already set. This request will be modified with authentication headers.
+</ParamField>
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials containing:
+  - Account ID
+  - Access key ID
+  - Secret access key
+  - Bucket name
+</ParamField>
+
+<ParamField path="payloadHash" type="String" default="UNSIGNED-PAYLOAD">
+  SHA-256 hex digest of the request body. Use:
+  - `"UNSIGNED-PAYLOAD"` for streaming uploads or when the payload isn't pre-hashed
+  - `AWSV4Signer.sha256Hex("")` for empty body (GET, DELETE, HEAD requests)
+  - `AWSV4Signer.sha256Hex(bodyContent)` for requests with a body
+</ParamField>
+
+<ParamField path="date" type="Date" default="Date()">
+  Signing date. Defaults to current time. Must match the date in `x-amz-date` header.
+</ParamField>
+
+**Returns:** Signed URLRequest with `Authorization`, `x-amz-date`, `x-amz-content-sha256`, and `Host` headers.
+
+#### Implementation Details
+
+The signing process follows the AWS Signature Version 4 specification:
+
+1. **Add required headers**
+
+```swift
+// Example from AWSV4Signer.swift:24-33
+let amzDate = amzDateString(from: date)  // Format: "20240315T123045Z"
+let shortDate = shortDateString(from: date)  // Format: "20240315"
+let credentialScope = "\(shortDate)/auto/s3/aws4_request"
+
+request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
+request.setValue(payloadHash, forHTTPHeaderField: "x-amz-content-sha256")
+if let host = request.url?.host {
+    request.setValue(host, forHTTPHeaderField: "Host")
+}
+```
+
+2. **Build canonical request**
+
+```swift
+// Example from AWSV4Signer.swift:36-57
+let httpMethod = request.httpMethod ?? "PUT"
+let canonicalURI = canonicalPath(from: request.url)
+let canonicalQS = canonicalQueryString(from: request.url)
+
+let allHeaders = request.allHTTPHeaderFields ?? [:]
+let sortedLowercasedKeys = allHeaders.keys.map { $0.lowercased() }.sorted()
+let signedHeaders = sortedLowercasedKeys.joined(separator: ";")
+let canonicalHeaders = sortedLowercasedKeys
+    .map { key -> String in
+        let value = allHeaders.first { $0.key.lowercased() == key }?.value ?? ""
+        return "\(key):\(value.trimmingCharacters(in: .whitespaces))"
+    }
+    .joined(separator: "\n")
+
+let canonicalRequest = [
+    httpMethod,
+    canonicalURI,
+    canonicalQS,
+    canonicalHeaders + "\n",
+    signedHeaders,
+    payloadHash
+].joined(separator: "\n")
+```
+
+3. **Create string to sign**
+
+```swift
+// Example from AWSV4Signer.swift:59-66
+let canonicalRequestHash = sha256Hex(canonicalRequest)
+let stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    canonicalRequestHash
+].joined(separator: "\n")
+```
+
+4. **Derive signing key and compute signature**
+
+```swift
+// Example from AWSV4Signer.swift:68-76
+let signingKey = deriveSigningKey(
+    secret: credentials.secretAccessKey,
+    date: shortDate,
+    region: "auto",  // R2 uses "auto" region
+    service: "s3"
+)
+let signature = hmacHex(key: signingKey, data: Data(stringToSign.utf8))
+
+let authorization = "AWS4-HMAC-SHA256 Credential=\(credentials.accessKeyId)/\(credentialScope), SignedHeaders=\(signedHeaders), Signature=\(signature)"
+request.setValue(authorization, forHTTPHeaderField: "Authorization")
+```
+
+### presignedURL()
+
+Generates a presigned GET URL valid for a specified duration.
+
+```swift
+static func presignedURL(
+    for key: String,
+    credentials: R2Credentials,
+    expiresIn: Int = 3600,
+    date: Date = Date()
+) -> URL?
+```
+
+<ParamField path="key" type="String" required>
+  Object key in the bucket. Example: `"photos/vacation.jpg"`
+</ParamField>
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials for signing the URL.
+</ParamField>
+
+<ParamField path="expiresIn" type="Int" default="3600">
+  Number of seconds the URL should remain valid. Default is 1 hour (3600 seconds).
+</ParamField>
+
+<ParamField path="date" type="Date" default="Date()">
+  Signing date. The expiration is calculated from this date.
+</ParamField>
+
+**Returns:** Presigned URL that can be fetched without auth headers, or `nil` if URL construction fails.
+
+#### Implementation Details
+
+Presigned URLs embed authentication in query parameters instead of headers:
+
+```swift
+// Example from AWSV4Signer.swift:146-201
+let region = "auto"
+let service = "s3"
+let amzDate = amzDateString(from: date)
+let shortDate = shortDateString(from: date)
+let credentialScope = "\(shortDate)/\(region)/\(service)/aws4_request"
+
+// Build URL with encoded key
+var comps = URLComponents()
+comps.scheme = "https"
+comps.host = "\(credentials.accountId).r2.cloudflarestorage.com"
+comps.percentEncodedPath = "/\(credentials.bucketName)/\(encodedKey)"
+
+// Add presign query parameters (must be sorted)
+comps.queryItems = [
+    URLQueryItem(name: "X-Amz-Algorithm",     value: "AWS4-HMAC-SHA256"),
+    URLQueryItem(name: "X-Amz-Credential",    value: "\(credentials.accessKeyId)/\(credentialScope)"),
+    URLQueryItem(name: "X-Amz-Date",          value: amzDate),
+    URLQueryItem(name: "X-Amz-Expires",       value: "\(expiresIn)"),
+    URLQueryItem(name: "X-Amz-SignedHeaders", value: "host"),
+]
+
+// Create canonical request and signature
+let canonicalRequest = [
+    "GET", canonicalURI, canonicalQS,
+    "host:\(host)\n", "host", "UNSIGNED-PAYLOAD"
+].joined(separator: "\n")
+
+let stringToSign = [
+    "AWS4-HMAC-SHA256", amzDate, credentialScope, sha256Hex(canonicalRequest)
+].joined(separator: "\n")
+
+let signingKey = deriveSigningKey(...)
+let signature = hmacHex(key: signingKey, data: Data(stringToSign.utf8))
+
+// Append signature to query parameters
+comps.queryItems?.append(URLQueryItem(name: "X-Amz-Signature", value: signature))
+return comps.url
+```
+
+### sha256Hex()
+
+Computes SHA-256 hash of a string and returns hex-encoded result.
+
+```swift
+static func sha256Hex(_ string: String) -> String
+```
+
+<ParamField path="string" type="String" required>
+  Input string to hash.
+</ParamField>
+
+**Returns:** Lowercase hex-encoded SHA-256 digest.
+
+```swift
+// Example from AWSV4Signer.swift:203-206
+let digest = SHA256.hash(data: Data(string.utf8))
+return digest.map { String(format: "%02x", $0) }.joined()
+```
+
+## Helper Methods
+
+### URI Encoding
+
+The signer uses strict URI encoding that matches AWS requirements:
+
+```swift
+private static func uriEncode(_ string: String) -> String {
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~")
+    return string.addingPercentEncoding(withAllowedCharacters: allowed) ?? string
+}
+```
+
+Only alphanumerics and `-._~` are left unencoded, matching AWS Signature V4 specifications.
+
+### Canonical Path
+
+The canonical path preserves trailing slashes and applies strict encoding:
+
+```swift
+// Example from AWSV4Signer.swift:101-126
+private static func canonicalPath(from url: URL?) -> String {
+    guard let url else { return "/" }
+    
+    // Extract raw percent-encoded path to preserve trailing slashes
+    let rawPath: String
+    if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+       !comps.percentEncodedPath.isEmpty {
+        rawPath = comps.percentEncodedPath
+    } else {
+        rawPath = url.path
+    }
+    
+    guard !rawPath.isEmpty else { return "/" }
+    
+    // Decode each segment then re-encode with strict AWS URI-encode
+    let hasTrailing = rawPath.hasSuffix("/")
+    let segments = rawPath.components(separatedBy: "/")
+    let encoded = segments
+        .map { seg -> String in
+            let decoded = seg.removingPercentEncoding ?? seg
+            return uriEncode(decoded)
+        }
+        .joined(separator: "/")
+    
+    // Restore trailing slash if present
+    return hasTrailing && !encoded.hasSuffix("/") ? encoded + "/" : encoded
+}
+```
+
+This is crucial for R2 folder operations where trailing slashes distinguish folders from files.
+
+### Canonical Query String
+
+Query parameters are sorted and strictly encoded:
+
+```swift
+// Example from AWSV4Signer.swift:128-136
+private static func canonicalQueryString(from url: URL?) -> String {
+    guard let url,
+          let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+          let items = comps.queryItems, !items.isEmpty else { return "" }
+    return items
+        .sorted { $0.name < $1.name }
+        .map { "\(uriEncode($0.name))=\(uriEncode($0.value ?? ""))" }
+        .joined(separator: "&")
+}
+```
+
+### Signing Key Derivation
+
+The signing key is derived through multiple HMAC operations:
+
+```swift
+// Example from AWSV4Signer.swift:208-214
+private static func deriveSigningKey(
+    secret: String,
+    date: String,
+    region: String,
+    service: String
+) -> SymmetricKey {
+    let kSecret = SymmetricKey(data: Data(("AWS4" + secret).utf8))
+    let kDate = hmac(key: kSecret, data: Data(date.utf8))
+    let kRegion = hmac(key: kDate, data: Data(region.utf8))
+    let kService = hmac(key: kRegion, data: Data(service.utf8))
+    return hmac(key: kService, data: Data("aws4_request".utf8))
+}
+```
+
+This creates a key hierarchy: `kSecret -> kDate -> kRegion -> kService -> kSigning`
+
+## Date Formatting
+
+Two date formats are used:
+
+```swift
+// AMZ date format: "20240315T123045Z"
+private static func amzDateString(from date: Date) -> String {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+    fmt.timeZone = TimeZone(identifier: "UTC")
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    return fmt.string(from: date)
+}
+
+// Short date format: "20240315"
+private static func shortDateString(from date: Date) -> String {
+    let fmt = DateFormatter()
+    fmt.dateFormat = "yyyyMMdd"
+    fmt.timeZone = TimeZone(identifier: "UTC")
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    return fmt.string(from: date)
+}
+```
+
+## Usage Examples
+
+```swift
+let credentials = R2Credentials(
+    accountId: "your-account-id",
+    accessKeyId: "your-access-key",
+    secretAccessKey: "your-secret-key",
+    bucketName: "my-bucket"
+)
+
+// Sign a PUT request for uploading
+var uploadRequest = URLRequest(url: uploadURL)
+uploadRequest.httpMethod = "PUT"
+uploadRequest.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+
+let signedRequest = AWSV4Signer.sign(
+    request: uploadRequest,
+    credentials: credentials,
+    payloadHash: "UNSIGNED-PAYLOAD"  // For streaming uploads
+)
+
+// Sign a GET request
+var getRequest = URLRequest(url: objectURL)
+getRequest.httpMethod = "GET"
+
+let signedGet = AWSV4Signer.sign(
+    request: getRequest,
+    credentials: credentials,
+    payloadHash: AWSV4Signer.sha256Hex("")  // Empty body for GET
+)
+
+// Generate a presigned URL (no authentication headers needed)
+if let presignedURL = AWSV4Signer.presignedURL(
+    for: "photos/vacation.jpg",
+    credentials: credentials,
+    expiresIn: 3600  // Valid for 1 hour
+) {
+    // Share this URL with others - it works without credentials
+    print("Download URL: \(presignedURL)")
+    
+    // Fetch using a regular HTTP GET
+    let (data, _) = try await URLSession.shared.data(from: presignedURL)
+}
+
+// Sign a DELETE request
+var deleteRequest = URLRequest(url: objectURL)
+deleteRequest.httpMethod = "DELETE"
+
+let signedDelete = AWSV4Signer.sign(
+    request: deleteRequest,
+    credentials: credentials,
+    payloadHash: AWSV4Signer.sha256Hex("")  // Empty body
+)
+```
+
+## AWS Signature V4 Specification
+
+The implementation follows the official AWS Signature Version 4 specification:
+
+<Steps>
+  <Step title="Canonical Request">
+    Normalize the HTTP request into a canonical format:
+    ```
+    HTTPMethod\n
+    CanonicalURI\n
+    CanonicalQueryString\n
+    CanonicalHeaders\n
+    SignedHeaders\n
+    HashedPayload
+    ```
+  </Step>
+  
+  <Step title="String to Sign">
+    Create a string that includes the algorithm, timestamp, credential scope, and hashed canonical request:
+    ```
+    AWS4-HMAC-SHA256\n
+    Timestamp\n
+    CredentialScope\n
+    HashedCanonicalRequest
+    ```
+  </Step>
+  
+  <Step title="Signing Key">
+    Derive a signing key through a series of HMAC operations:
+    ```
+    kSecret = HMAC("AWS4" + SecretKey, Date)
+    kRegion = HMAC(kSecret, Region)
+    kService = HMAC(kRegion, Service)
+    kSigning = HMAC(kService, "aws4_request")
+    ```
+  </Step>
+  
+  <Step title="Signature">
+    Calculate the signature by HMAC-SHA256 of the string to sign with the signing key:
+    ```
+    Signature = HMAC-SHA256(kSigning, StringToSign)
+    ```
+  </Step>
+  
+  <Step title="Authorization Header">
+    Add the Authorization header to the request:
+    ```
+    AWS4-HMAC-SHA256 Credential=AccessKeyId/CredentialScope,
+    SignedHeaders=SignedHeaders,
+    Signature=Signature
+    ```
+  </Step>
+</Steps>
+
+## Cloudflare R2 Specifics
+
+<Note>
+  R2 uses the region `"auto"` instead of standard AWS regions like `"us-east-1"`. The endpoint format is:
+  ```
+  https://{accountId}.r2.cloudflarestorage.com/{bucketName}/{key}
+  ```
+</Note>
+
+## Related Services
+
+- [R2UploadService](/dev/services/r2-upload-service) - Uses AWSV4Signer for upload authentication
+- [R2BrowseService](/dev/services/r2-browse-service) - Uses AWSV4Signer for browse/delete operations

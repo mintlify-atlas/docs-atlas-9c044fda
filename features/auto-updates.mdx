@@ -1,0 +1,312 @@
+---
+title: Auto-Update System
+description: Stay up to date with automatic updates from GitHub releases
+---
+
+r2Vault includes a built-in auto-update system that checks for new releases on GitHub and allows in-app installation.
+
+## GitHub Releases Integration
+
+The update system fetches release information from the GitHub API:
+
+```swift UpdateService.swift:32-51
+enum UpdateService {
+    private static let apiURL = URL(string: "https://api.github.com/repos/xaif/r2Vault/releases/latest")!
+
+    /// Fetches the latest release from GitHub and returns it if it is newer than the running version.
+    static func checkForUpdate() async throws -> GitHubRelease? {
+        var request = URLRequest(url: apiURL, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+
+        let latestVersion = release.tagName.trimmingCharacters(in: .init(charactersIn: "v"))
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+
+        if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+            return release
+        }
+        return nil
+    }
+}
+```
+
+<Info>
+The update check uses `.reloadIgnoringLocalCacheData` to ensure you always get the latest release information.
+</Info>
+
+## Release Model
+
+The GitHub release data structure includes all necessary information:
+
+```swift UpdateService.swift:3-30
+struct GitHubRelease: Decodable {
+    let tagName: String
+    let htmlUrl: String
+    let body: String?
+    let assets: [GitHubAsset]
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlUrl = "html_url"
+        case body
+        case assets
+    }
+
+    /// The browser download URL for the first .dmg asset, if present.
+    var dmgDownloadURL: URL? {
+        assets.first(where: { $0.name.hasSuffix(".dmg") }).flatMap { URL(string: $0.browserDownloadUrl) }
+    }
+}
+
+struct GitHubAsset: Decodable {
+    let name: String
+    let browserDownloadUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadUrl = "browser_download_url"
+    }
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Tag Name" icon="tag">
+    Version number (e.g., "v1.2.3")
+  </Card>
+  <Card title="HTML URL" icon="link">
+    Link to the release page on GitHub
+  </Card>
+  <Card title="Body" icon="file-text">
+    Release notes and changelog
+  </Card>
+  <Card title="Assets" icon="download">
+    Downloadable files (.dmg installer)
+  </Card>
+</CardGroup>
+
+## Version Comparison
+
+Versions are compared using numeric comparison to handle multi-digit version numbers correctly:
+
+```swift UpdateService.swift:43-48
+let latestVersion = release.tagName.trimmingCharacters(in: .init(charactersIn: "v"))
+let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+
+if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+    return release
+}
+```
+
+<Tip>
+The `v` prefix is automatically stripped from version tags, so both "v1.2.3" and "1.2.3" are handled correctly.
+</Tip>
+
+## Check for Updates (Manual and Automatic)
+
+The app checks for updates on startup and can be triggered manually:
+
+```swift AppViewModel.swift:637-659
+/// - Parameter userInitiated: Pass `true` when triggered by the user (e.g. menu item).
+///   Shows the sheet even when already up to date. Automatic startup checks only show
+///   the sheet when a new version is actually available.
+func checkForUpdates(userInitiated: Bool = false) {
+    guard !updateStatus.isChecking else { return }
+    updateStatus = .checking
+    Task {
+        do {
+            if let release = try await UpdateService.checkForUpdate() {
+                updateStatus = .available(release)
+                showUpdateSheet = true
+            } else {
+                updateStatus = .upToDate
+                if userInitiated { showUpdateSheet = true }
+            }
+        } catch {
+            updateStatus = .failed(error.localizedDescription)
+            if userInitiated { showUpdateSheet = true }
+        }
+    }
+}
+```
+
+### Update Status States
+
+The app tracks the update check status:
+
+```swift AppViewModel.swift:51-63
+enum UpdateStatus {
+    case idle
+    case checking
+    case upToDate
+    case available(GitHubRelease)
+    case failed(String)
+
+    var isChecking: Bool {
+        if case .checking = self { return true }
+        return false
+    }
+}
+var updateStatus: UpdateStatus = .idle
+var showUpdateSheet = false
+```
+
+<Check>
+Automatic checks on startup only show the update sheet when a new version is available. Manual checks always show the sheet, even if you're already up to date.
+</Check>
+
+## Automatic Startup Check
+
+The app automatically checks for updates when it launches:
+
+```swift AppViewModel.swift:133-136
+init() {
+    loadCredentials()
+    checkForUpdates()
+}
+```
+
+<Info>
+This happens silently in the background. You'll only see a notification if a new version is available.
+</Info>
+
+## In-App Download and Install
+
+When an update is available, the app presents an update sheet with:
+
+- Current version vs. new version
+- Release notes from GitHub
+- Download button linking to the .dmg file
+- "View on GitHub" link for full release details
+
+The `dmgDownloadURL` property automatically finds the DMG installer:
+
+```swift UpdateService.swift:17-19
+/// The browser download URL for the first .dmg asset, if present.
+var dmgDownloadURL: URL? {
+    assets.first(where: { $0.name.hasSuffix(".dmg") }).flatMap { URL(string: $0.browserDownloadUrl) }
+}
+```
+
+<Steps>
+  <Step title="Update Available">
+    The update sheet appears showing the new version and release notes
+  </Step>
+  <Step title="Download DMG">
+    Click the download button to get the latest .dmg installer
+  </Step>
+  <Step title="Install">
+    Open the downloaded DMG and drag r2Vault to Applications
+  </Step>
+  <Step title="Restart">
+    Quit and relaunch r2Vault to use the new version
+  </Step>
+</Steps>
+
+## Manual Update Check
+
+You can manually check for updates from the app menu:
+
+1. Click "r2Vault" in the menu bar
+2. Select "Check for Updates..."
+3. The update check runs and displays the result
+
+<Tip>
+Manual checks will show a confirmation even if you're already running the latest version.
+</Tip>
+
+## Update Frequency
+
+The app currently checks for updates:
+
+- **On launch** (automatic, silent unless update available)
+- **On demand** (via menu bar "Check for Updates..." command)
+
+<Note>
+There is no background auto-update daemon. The app only checks when it's running.
+</Note>
+
+## GitHub Release Requirements
+
+For the auto-update system to work, GitHub releases must:
+
+1. Use semantic versioning tags (e.g., `v1.2.3`)
+2. Include a `.dmg` file as a release asset
+3. Be marked as "Latest Release" on GitHub
+
+<CodeGroup>
+```json Example Release API Response
+{
+  "tag_name": "v1.5.0",
+  "html_url": "https://github.com/xaif/r2Vault/releases/tag/v1.5.0",
+  "body": "## What's New\n\n- Added folder upload support\n- Improved upload speed\n- Fixed Quick Look for PDFs",
+  "assets": [
+    {
+      "name": "r2Vault-1.5.0.dmg",
+      "browser_download_url": "https://github.com/xaif/r2Vault/releases/download/v1.5.0/r2Vault-1.5.0.dmg"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+## Error Handling
+
+Update check failures are captured and reported:
+
+```swift AppViewModel.swift:654-657
+catch {
+    updateStatus = .failed(error.localizedDescription)
+    if userInitiated { showUpdateSheet = true }
+}
+```
+
+Common failure scenarios:
+- Network connection unavailable
+- GitHub API rate limit exceeded
+- Invalid JSON response
+- No .dmg asset found in release
+
+<Warning>
+If the update check fails, the app continues running normally. You can retry the check manually from the menu.
+</Warning>
+
+## Privacy and Security
+
+<AccordionGroup>
+  <Accordion title="What data is sent to GitHub?">
+    Only a standard HTTPS GET request to the GitHub API. No personal information or telemetry is transmitted.
+  </Accordion>
+  
+  <Accordion title="Is the DMG download secure?">
+    The DMG is downloaded directly from GitHub Releases over HTTPS. The download URL is authenticated by GitHub's SSL certificate.
+  </Accordion>
+  
+  <Accordion title="Can I disable auto-update checks?">
+    Currently, the app always checks on launch. You can skip installing updates by dismissing the update sheet.
+  </Accordion>
+  
+  <Accordion title="How is the DMG verified?">
+    The DMG should be code-signed by the developer. macOS Gatekeeper verifies the signature when you open the installer.
+  </Accordion>
+</AccordionGroup>
+
+## Open Source Releases
+
+All r2Vault releases are open source and published on GitHub:
+
+<Card title="r2Vault Releases" icon="github" href="https://github.com/xaif/r2Vault/releases">
+  View all releases, changelogs, and download previous versions
+</Card>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="rocket" href="/installation">
+    Install r2Vault for the first time
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guide/configuration">
+    Set up your R2 credentials
+  </Card>
+</CardGroup>

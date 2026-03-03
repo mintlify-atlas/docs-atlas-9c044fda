@@ -1,0 +1,130 @@
+---
+title: Installation
+description: How to install r2Vault on macOS 15.0 or later
+---
+
+## Prerequisites
+
+Before installing r2Vault, ensure you have:
+
+<Steps>
+  <Step title="macOS 15.0 or later">
+    r2Vault requires macOS 15.0+ to run. Check your version in **System Settings → General → About**.
+  </Step>
+  
+  <Step title="Cloudflare R2 account">
+    You'll need a [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket with API credentials. If you don't have one yet, sign up at [dash.cloudflare.com](https://dash.cloudflare.com).
+  </Step>
+</Steps>
+
+## Download and Install
+
+### Option 1: Download the DMG (Recommended)
+
+<Steps>
+  <Step title="Download the latest release">
+    Grab the latest DMG from the [GitHub Releases](https://github.com/xaif/r2Vault/releases/latest) page.
+  </Step>
+  
+  <Step title="Open the DMG and drag to Applications">
+    Double-click the downloaded DMG file and drag **R2 Vault.app** to your Applications folder.
+  </Step>
+  
+  <Step title="Handle the 'damaged' warning">
+    <Warning>
+      r2Vault is **not notarized with Apple**. macOS will likely show a warning that the app is "damaged" and can't be opened.
+    </Warning>
+
+    To fix this, open **Terminal** and run:
+
+    ```bash
+    xattr -dr com.apple.quarantine /Applications/R2Vault.app
+    ```
+
+    This removes the quarantine attribute that macOS applies to unsigned apps downloaded from the internet.
+  </Step>
+  
+  <Step title="Launch r2Vault">
+    Open r2Vault from your Applications folder or Spotlight. The app will appear in your **menu bar** (top-right corner of your screen).
+  </Step>
+</Steps>
+
+<Note>
+  **Why isn't r2Vault notarized?**
+  
+  Apple notarization requires an Apple Developer account ($99/year). Since r2Vault is a free, open-source project, it is not currently notarized. The `xattr` command is a standard workaround for running unsigned Mac apps.
+</Note>
+
+### Option 2: Build from Source
+
+If you prefer to build r2Vault yourself, or you want to contribute to development:
+
+<Steps>
+  <Step title="Prerequisites for building">
+    - macOS 15.0+
+    - Xcode 16+
+    - Git
+  </Step>
+  
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/xaif/r2Vault.git
+    cd r2Vault
+    ```
+  </Step>
+  
+  <Step title="Open in Xcode">
+    ```bash
+    open Fiaxe.xcodeproj
+    ```
+  </Step>
+  
+  <Step title="Build and run">
+    Press **⌘R** to build and run the app in Xcode.
+  </Step>
+</Steps>
+
+<Note>
+  For more details on building from source, see [Building from Source](/dev/building-from-source).
+</Note>
+
+## Verify Installation
+
+Once installed, you should see the r2Vault icon in your menu bar. Click the icon to open the popover interface. If you haven't configured credentials yet, you'll be prompted to open Settings.
+
+## Next Steps
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Configure your R2 credentials and upload your first file
+</Card>
+
+## Troubleshooting
+
+### "R2Vault.app is damaged and can't be opened"
+
+This is the most common issue. Run the `xattr` command shown above in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/R2Vault.app
+```
+
+### "Cannot be opened because the developer cannot be verified"
+
+1. Open **System Settings → Privacy & Security**
+2. Scroll down to the **Security** section
+3. You should see a message about r2Vault being blocked. Click **Open Anyway**
+4. Confirm by clicking **Open** in the dialog
+
+Alternatively, use the `xattr` command above to bypass the check entirely.
+
+### App doesn't appear in menu bar
+
+If the menu bar icon doesn't appear:
+
+1. Make sure the app is running (check Activity Monitor for "R2Vault")
+2. Try quitting and relaunching the app
+3. Check that you're not hiding menu bar icons (System Settings → Control Center → Automatically hide and show the menu bar)
+
+### Still having issues?
+
+Open an issue on [GitHub](https://github.com/xaif/r2Vault/issues) with details about your setup and the error you're seeing.

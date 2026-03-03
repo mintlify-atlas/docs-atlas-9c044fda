@@ -1,0 +1,152 @@
+---
+title: Building from Source
+description: Learn how to build r2Vault from source on macOS
+---
+
+## Prerequisites
+
+Before building r2Vault, ensure you have the following:
+
+- **macOS 15.0+** (Sequoia or later)
+- **Xcode 16+** with Command Line Tools
+- A [Cloudflare R2](https://developers.cloudflare.com/r2/) bucket with API credentials (for testing)
+
+<Note>
+  r2Vault is built with Swift 6 and SwiftUI, leveraging modern concurrency patterns with async/await.
+</Note>
+
+## Build Instructions
+
+<Steps>
+  <Step title="Clone the repository">
+    Open Terminal and clone the r2Vault repository:
+    
+    ```bash
+    git clone https://github.com/xaif/r2Vault.git
+    cd r2Vault
+    ```
+  </Step>
+
+  <Step title="Open in Xcode">
+    Open the Xcode project:
+    
+    ```bash
+    open Fiaxe.xcodeproj
+    ```
+    
+    <Note>
+      The project is named "Fiaxe" internally but builds as "R2 Vault".
+    </Note>
+  </Step>
+
+  <Step title="Build and run">
+    In Xcode, select the **Fiaxe** scheme and press **⌘R** to build and run the app.
+    
+    The app will launch as a menu bar application. Look for the r2Vault icon in your macOS menu bar.
+  </Step>
+
+  <Step title="Configure credentials">
+    On first launch:
+    
+    1. Click the menu bar icon
+    2. Open **Settings** (⌘,)
+    3. Add your R2 credentials:
+       - **Account ID** — from your Cloudflare dashboard
+       - **Access Key ID** & **Secret Access Key** — from an R2 API token
+       - **Bucket Name**
+       - **Custom Domain** (optional) — for public URL generation
+  </Step>
+</Steps>
+
+## Release Builds
+
+### Building for Distribution
+
+To create a release build from the command line:
+
+```bash
+xcodebuild \
+  -project Fiaxe.xcodeproj \
+  -scheme Fiaxe \
+  -configuration Release \
+  -derivedDataPath build \
+  CODE_SIGN_IDENTITY="-" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGNING_ALLOWED=NO \
+  MACOSX_DEPLOYMENT_TARGET=15.0 \
+  clean build
+```
+
+The compiled app will be located at:
+```
+build/Build/Products/Release/R2Vault.app
+```
+
+### Creating a DMG
+
+The project includes a GitHub Actions workflow that automatically creates DMG installers. You can view the DMG creation script in `.github/workflows/release.yml`.
+
+For manual DMG creation, use tools like:
+- `hdiutil` (built into macOS)
+- [create-dmg](https://github.com/create-dmg/create-dmg)
+- [node-appdmg](https://github.com/LinusU/node-appdmg)
+
+### Code Signing
+
+<Warning>
+  r2Vault is currently **not notarized with Apple**. Users will need to remove the quarantine attribute after downloading:
+  
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/R2Vault.app
+  ```
+</Warning>
+
+If you want to sign the app for personal use:
+
+1. Select your development team in Xcode under **Signing & Capabilities**
+2. Update the bundle identifier to something unique
+3. Build with code signing enabled
+
+## Automated Builds
+
+The project uses GitHub Actions for automated builds and releases:
+
+- **Trigger**: Push a tag matching `v*.*.*` (e.g., `v1.2.3`)
+- **Runner**: macOS 15 with Xcode 16
+- **Output**: DMG installer attached to GitHub Release
+- **Changelog**: Automatically extracted from `CHANGELOG.md`
+
+The release workflow is defined in `.github/workflows/release.yml`.
+
+## Troubleshooting
+
+### Build Errors
+
+If you encounter build errors:
+
+1. **Clean build folder**: Product → Clean Build Folder (⇧⌘K)
+2. **Check Xcode version**: Ensure you're running Xcode 16+
+3. **Verify macOS version**: r2Vault requires macOS 15.0+
+4. **Reset derived data**: `rm -rf ~/Library/Developer/Xcode/DerivedData`
+
+### Runtime Issues
+
+**Menu bar icon doesn't appear:**
+- The app runs exclusively in the menu bar (no Dock icon)
+- Check Activity Monitor to verify the app is running
+- Restart the app if needed
+
+**Sandbox permissions:**
+- File uploads via drag-and-drop work automatically
+- File picker uploads require proper bookmark handling (already implemented)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-pull-request" href="/dev/contributing">
+    Learn how to contribute to r2Vault
+  </Card>
+  <Card title="Project Structure" icon="folder-tree" href="/dev/project-structure">
+    Understand the codebase architecture
+  </Card>
+</CardGroup>

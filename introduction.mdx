@@ -1,0 +1,97 @@
+---
+title: Introduction
+description: A native macOS client for browsing, managing, and uploading files to Cloudflare R2
+---
+
+## What is r2Vault?
+
+r2Vault is a **native macOS application** that brings the power of Cloudflare R2 storage to your desktop. Built with SwiftUI and optimized for macOS 15.0+, it provides a fast, elegant, and familiar interface for managing your R2 buckets—no browser required.
+
+Think of it as Finder for Cloudflare R2: browse files, drag-and-drop uploads, Quick Look previews, and a menu bar widget that's always one click away.
+
+<CardGroup cols={3}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get started with r2Vault on your Mac
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Configure your first bucket and upload files
+  </Card>
+  <Card title="Features" icon="sparkles" href="#key-features">
+    Explore what r2Vault can do
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Browse & Navigate
+
+- **Finder-style file browser** with breadcrumb navigation
+- **Icon and List view modes** for flexible file viewing
+- **Search, sort, and filter** files by name, size, date, or kind
+- **Quick Look preview** with spacebar—just like in Finder
+
+### Upload
+
+- **Drag-and-drop** files and folders directly from Finder
+- **Concurrent uploads** with real-time progress tracking
+- **Cancel individual uploads** or all at once
+- **Automatic public URL copy** to clipboard on upload completion
+- **Upload history** with copy, download, and delete actions
+
+### Menu Bar Widget
+
+- **Lives in the macOS menu bar**—always one click away
+- **Drop files directly** onto the popover to upload instantly
+- **Live per-file upload progress** with cancel buttons
+- **Recent uploads list** with copy link, download, and delete
+- **Stays open while you work**—won't dismiss on focus loss
+
+### Manage
+
+- **Create folders and delete** files/folders with confirmation dialogs
+- **Recursive folder deletion**—removes all contents in one action
+- **Batch delete** multiple items with a single confirmation
+- **Multiple R2 bucket support**—switch buckets from the gear menu
+- **Presigned URL generation** for secure sharing
+
+### Auto-Update
+
+- Check for Updates via the app menu (R2 Vault → Check for Updates)
+- Automatic in-app download and install of new releases
+
+## Technology Stack
+
+r2Vault is built with modern macOS technologies:
+
+| Layer | Technology |
+|-------|------------|
+| UI | SwiftUI |
+| Architecture | MVVM with `@Observable` |
+| Concurrency | Swift async/await, TaskGroup |
+| Auth | AWS Signature V4 (CryptoKit) |
+| Networking | URLSession |
+| Storage | UserDefaults, Keychain |
+| Menu Bar | AppKit `NSStatusItem` + `NSPopover` |
+
+<Note>
+  r2Vault uses the S3-compatible API to communicate with Cloudflare R2. All requests are signed with AWS Signature V4 authentication.
+</Note>
+
+## Why r2Vault?
+
+- **Native performance**: Built with Swift and SwiftUI, optimized for Apple Silicon
+- **Privacy-first**: Your credentials are stored securely in the macOS Keychain
+- **No subscription**: Free and open source under the MIT license
+- **Always accessible**: Menu bar integration means your files are always one click away
+- **Familiar interface**: If you know Finder, you know r2Vault
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Install r2Vault" icon="download" href="/installation">
+    Download the latest release or build from source
+  </Card>
+  <Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+</CardGroup>

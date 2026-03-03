@@ -1,0 +1,227 @@
+---
+title: Browsing Files
+description: Navigate your R2 bucket with a Finder-style interface, search, sort, and preview files
+---
+
+## Finder-Style Interface
+
+r2Vault provides a native macOS browsing experience modeled after Finder:
+
+- **Breadcrumb navigation** showing your current path
+- **Back/Forward buttons** for quick navigation
+- **Icons** and **List** view modes
+- **Multi-select** with batch operations
+- **Quick Look** preview with spacebar
+
+Source: `BrowserView.swift` (source: `Fiaxe/Views/BrowserView.swift:6-615`)
+
+## View Modes
+
+Switch between two layout modes using the segmented control in the toolbar:
+
+<Tabs>
+  <Tab title="Icons View">
+    Displays files and folders as a grid of icons with thumbnails.
+    
+    - Adaptive layout (120-140pt per cell)
+    - Image thumbnails auto-generated
+    - Double-click to open folders or preview files
+    - Single-click to select items
+    
+    **Keyboard shortcut**: Click the grid icon in the toolbar
+  </Tab>
+  
+  <Tab title="List View">
+    Displays files and folders in a sortable table.
+    
+    **Columns**:
+    - Name (with icon)
+    - Kind (file type)
+    - Size (in bytes/KB/MB)
+    - Date Modified
+    
+    Click any column header to sort. Click again to reverse the order.
+  </Tab>
+</Tabs>
+
+View mode preference is preserved between sessions.
+
+## Breadcrumb Navigation
+
+The path bar at the top shows your current location in the bucket:
+
+```
+[Bucket] > photos > vacation > 2024
+         ↑         ↑          ↑
+      clickable  clickable  current
+```
+
+<Info>
+  Click any segment to jump directly to that folder. The current folder is highlighted and non-clickable.
+</Info>
+
+### Navigation Controls
+
+Use the toolbar buttons to move through your browsing history:
+
+| Button | Action | Keyboard Shortcut |
+|--------|--------|-------------------|
+| ← | Go back to previous folder | — |
+| → | Go forward in history | — |
+| ↻ | Refresh current folder | — |
+
+Implementation: `BrowserView.swift:388-401` (source: `Fiaxe/Views/BrowserView.swift:388-401`)
+
+## Search, Sort, and Filter
+
+### Search
+
+Use the search field in the toolbar to filter files and folders by name:
+
+<Steps>
+  <Step title="Focus the search field">
+    Click the search icon or press `⌘F`
+  </Step>
+  
+  <Step title="Type your query">
+    Results filter in real-time as you type (case-insensitive)
+  </Step>
+  
+  <Step title="Clear">
+    Click the × or press `Esc` to show all items again
+  </Step>
+</Steps>
+
+Source: `AppViewModel.swift:101-108` (source: `Fiaxe/ViewModels/AppViewModel.swift:101-108`)
+
+### Sort Options
+
+Click the **Sort** menu (↕️ icon) to choose a sort key:
+
+<AccordionGroup>
+  <Accordion title="Name" icon="font">
+    Alphabetical order (A-Z or Z-A). Folders always appear before files when sorting by name.
+  </Accordion>
+  
+  <Accordion title="Size" icon="weight">
+    File size in bytes (smallest to largest or vice versa)
+  </Accordion>
+  
+  <Accordion title="Date Modified" icon="clock">
+    Last modified timestamp (oldest to newest or vice versa)
+  </Accordion>
+  
+  <Accordion title="Kind" icon="tag">
+    File type (e.g., images, documents, folders)
+  </Accordion>
+</AccordionGroup>
+
+Toggle between **Ascending** and **Descending** order using the same menu.
+
+Implementation: `AppViewModel.swift:13-18` (source: `Fiaxe/ViewModels/AppViewModel.swift:13-18`)
+
+## Quick Look Preview
+
+Preview files instantly without downloading them:
+
+<Steps>
+  <Step title="Select a file">
+    Click once to select any file in the browser
+  </Step>
+  
+  <Step title="Press spacebar">
+    The Quick Look panel opens with a live preview
+  </Step>
+  
+  <Step title="Close preview">
+    Press spacebar again or click outside the panel
+  </Step>
+</Steps>
+
+<Check>
+  Quick Look streams files directly from R2 using presigned URLs — no local download required!
+</Check>
+
+### Supported File Types
+
+Quick Look supports the same file types as macOS Finder:
+
+- **Images**: JPG, PNG, GIF, HEIC, WebP, SVG, TIFF
+- **Videos**: MP4, MOV, AVI, MKV, WebM
+- **Documents**: PDF, TXT, Markdown, RTF
+- **Code**: Swift, Python, JavaScript, JSON, HTML, CSS
+- **Audio**: MP3, M4A, WAV, FLAC, AAC
+
+Source: `QuickLookCoordinator.swift:27-45` (source: `Fiaxe/Services/QuickLookCoordinator.swift:27-45`)
+
+## Multi-Select
+
+Select multiple files and folders for batch operations:
+
+### Selection Methods
+
+<CardGroup cols={2}>
+  <Card title="Click to select" icon="mouse-pointer">
+    Click items one by one to add them to the selection
+  </Card>
+  
+  <Card title="Select All" icon="check-double">
+    Use the **Select** menu (✓ icon) and choose **Select All**
+  </Card>
+</CardGroup>
+
+### Selection Actions
+
+Once items are selected, the status bar displays:
+
+```
+3 of 45 selected     [Delete Selected]  [Deselect]
+```
+
+Available actions:
+- **Delete Selected** — Permanently remove all selected items (see [Managing Files](/guide/managing-files))
+- **Deselect** — Clear the current selection
+
+Source: `BrowserView.swift:322-349` (source: `Fiaxe/Views/BrowserView.swift:322-349`)
+
+## Context Menu
+
+Right-click any file or folder to access quick actions:
+
+### For Files:
+- **Preview** — Open in Quick Look
+- **Copy URL** — Copy the public URL to clipboard
+- **Select** — Add to multi-selection
+- **Delete** — Permanently remove from R2
+
+### For Folders:
+- **Open** — Navigate into the folder
+- **Select** — Add to multi-selection
+- **Delete Folder & Contents** — Recursively delete (see warning below)
+
+<Warning>
+  Deleting a folder removes **all files inside it** recursively. This action cannot be undone.
+</Warning>
+
+Implementation: `BrowserView.swift:353-381` (source: `Fiaxe/Views/BrowserView.swift:353-381`)
+
+## Empty State
+
+When a folder is empty, r2Vault displays:
+
+- Drop zone with "Drop Files to Upload" message
+- **Select Files** button to open the file picker
+- Instructions to use the **+** button in the toolbar
+
+Source: `BrowserView.swift:252-269` (source: `Fiaxe/Views/BrowserView.swift:252-269`)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Upload Files" icon="cloud-arrow-up" href="/guide/uploading">
+    Learn about drag-and-drop uploads and progress tracking
+  </Card>
+  <Card title="Manage Files" icon="folder-gear" href="/guide/managing-files">
+    Create folders, delete files, and generate presigned URLs
+  </Card>
+</CardGroup>

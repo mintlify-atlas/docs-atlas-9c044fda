@@ -1,0 +1,298 @@
+---
+title: Managing Files
+description: Create folders, delete files and folders, and generate presigned URLs in r2Vault
+---
+
+## Creating Folders
+
+Organize your R2 bucket by creating virtual folders:
+
+<Steps>
+  <Step title="Click the + button">
+    Opens the upload/actions menu in the toolbar
+  </Step>
+  
+  <Step title="Select New Folder…">
+    Opens the folder creation dialog
+  </Step>
+  
+  <Step title="Enter folder name">
+    Type a name (e.g., `photos`, `documents`, `2024-backups`)
+  </Step>
+  
+  <Step title="Click Create">
+    The folder appears immediately in the current directory
+  </Step>
+</Steps>
+
+<Info>
+  Folders in R2 are **virtual** — they're represented by zero-byte objects with a trailing slash (e.g., `photos/`).
+</Info>
+
+Implementation: `BrowserView.swift:502-527` (source: `Fiaxe/Views/BrowserView.swift:502-527`)
+
+### Folder Naming Rules
+
+- Must not be empty (after trimming whitespace)
+- Can contain letters, numbers, hyphens, underscores
+- Avoid special characters that require URL encoding
+- The app automatically appends a trailing `/` if needed
+
+Source: `R2BrowseService.swift:88-110` (source: `Fiaxe/Services/R2BrowseService.swift:88-110`)
+
+## Deleting Files and Folders
+
+Remove files and folders permanently from your R2 bucket.
+
+<Warning>
+  Deletions are **permanent** and cannot be undone. r2Vault does not have a trash or recycle bin.
+</Warning>
+
+### Delete a Single File
+
+<Tabs>
+  <Tab title="Context Menu">
+    1. Right-click the file
+    2. Select **Delete**
+    3. Confirm in the dialog:
+    
+    ```
+    Delete "photo.jpg"?
+    
+    This will permanently remove the file from R2.
+    This cannot be undone.
+    
+    [Delete]  [Cancel]
+    ```
+  </Tab>
+  
+  <Tab title="Keyboard">
+    1. Select the file
+    2. Press `⌫` (Delete)
+    3. Confirm the deletion
+  </Tab>
+</Tabs>
+
+### Delete Multiple Files (Batch Delete)
+
+Use multi-select to delete several files at once:
+
+<Steps>
+  <Step title="Select files">
+    Click files one by one to add them to the selection, or use **Select All** from the toolbar
+  </Step>
+  
+  <Step title="Open the selection menu">
+    Click the **✓** icon in the toolbar
+  </Step>
+  
+  <Step title="Choose Delete Selected">
+    Or click **Delete Selected** in the status bar at the bottom
+  </Step>
+  
+  <Step title="Confirm">
+    The confirmation dialog shows the count:
+    
+    ```
+    Delete 8 items?
+    
+    This will permanently remove the selected items
+    from R2 and cannot be undone. Folders will be
+    deleted recursively including all their contents.
+    
+    [Delete]  [Cancel]
+    ```
+  </Step>
+</Steps>
+
+<Check>
+  Batch deletions run **concurrently** for speed. Files and folders are deleted in parallel.
+</Check>
+
+Implementation: `AppViewModel.swift:313-333` (source: `Fiaxe/ViewModels/AppViewModel.swift:313-333`)
+
+## Recursive Folder Deletion
+
+Deleting a folder removes **all files and subfolders** inside it.
+
+### How It Works
+
+<Steps>
+  <Step title="User initiates delete">
+    Right-click a folder and select **Delete Folder & Contents**
+  </Step>
+  
+  <Step title="Confirmation dialog">
+    Shows a warning:
+    
+    ```
+    Delete "vacation" and all its contents?
+    
+    This will permanently delete the folder and all
+    files inside it from R2. This cannot be undone.
+    
+    [Delete Folder & Contents]  [Cancel]
+    ```
+  </Step>
+  
+  <Step title="Recursive enumeration">
+    r2Vault calls `listAllKeys()` to get every object key under the folder prefix (no delimiter)
+  </Step>
+  
+  <Step title="Concurrent deletion">
+    All keys are deleted in parallel using `withThrowingTaskGroup`
+  </Step>
+  
+  <Step title="Browser refresh">
+    The current folder view reloads to reflect the changes
+  </Step>
+</Steps>
+
+<Warning>
+  If the folder contains thousands of files, deletion may take several seconds. There is no progress indicator for individual deletions within a folder.
+</Warning>
+
+Source:
+- Recursive deletion logic: `AppViewModel.swift:336-347` (source: `Fiaxe/ViewModels/AppViewModel.swift:336-347`)
+- List all keys: `R2BrowseService.swift:115-155` (source: `Fiaxe/Services/R2BrowseService.swift:115-155`)
+
+### Example: Deleting a Nested Folder
+
+```
+vacation/
+├── photos/
+│   ├── beach.jpg
+│   ├── sunset.png
+│   └── family/
+│       ├── group.jpg
+│       └── kids.jpg
+└── videos/
+    └── drone.mp4
+```
+
+Deleting `vacation/` removes:
+- `vacation/photos/beach.jpg`
+- `vacation/photos/sunset.png`
+- `vacation/photos/family/group.jpg`
+- `vacation/photos/family/kids.jpg`
+- `vacation/videos/drone.mp4`
+- `vacation/photos/family/` (folder marker)
+- `vacation/photos/` (folder marker)
+- `vacation/videos/` (folder marker)
+- `vacation/` (folder marker)
+
+## Presigned URL Generation
+
+Generate temporary download URLs for private files.
+
+<Info>
+  Presigned URLs allow **read-only access** to R2 objects for a limited time without exposing your credentials.
+</Info>
+
+### Generate a Presigned URL
+
+<Tabs>
+  <Tab title="From Context Menu">
+    1. Right-click a file
+    2. Select **Copy URL**
+    3. The presigned URL is copied to clipboard
+  </Tab>
+  
+  <Tab title="From Quick Look">
+    Quick Look uses presigned URLs automatically to stream files without downloading
+  </Tab>
+  
+  <Tab title="From Upload History">
+    1. Open the menu bar widget
+    2. Hover over any recent upload
+    3. Click the **🔗 link icon**
+    4. Presigned URL is copied to clipboard
+  </Tab>
+</Tabs>
+
+### Presigned URL Format
+
+Generated URLs include AWS Signature V4 query parameters:
+
+```
+https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?
+  X-Amz-Algorithm=AWS4-HMAC-SHA256&
+  X-Amz-Credential=<access-key>%2F<date>%2Fauto%2Fs3%2Faws4_request&
+  X-Amz-Date=<timestamp>&
+  X-Amz-Expires=3600&
+  X-Amz-SignedHeaders=host&
+  X-Amz-Signature=<signature>
+```
+
+<ParamField path="X-Amz-Expires" type="number" default="3600">
+  Expiration time in seconds (default: **1 hour**)
+</ParamField>
+
+Implementation: `AWSV4Signer.swift` (source: `Fiaxe/Services/AWSV4Signer.swift`)
+
+### Use Cases for Presigned URLs
+
+<CardGroup cols={2}>
+  <Card title="Share privately" icon="share">
+    Share a file with someone without making the entire bucket public
+  </Card>
+  
+  <Card title="Download from browser" icon="download">
+    Paste the URL in a browser to download the file directly
+  </Card>
+  
+  <Card title="Embed in apps" icon="code">
+    Use in `<img>` tags, `<video>` tags, or API responses
+  </Card>
+  
+  <Card title="Quick Look preview" icon="eye">
+    r2Vault uses presigned URLs to stream files for preview without local download
+  </Card>
+</CardGroup>
+
+### Public vs. Presigned URLs
+
+| Type | When to Use | Example |
+|------|-------------|----------|
+| **Public URL** | Custom domain configured, bucket is public | `https://cdn.example.com/photo.jpg` |
+| **Presigned URL** | No custom domain, or bucket is private | `https://abc.r2.cloudflarestorage.com/bucket/photo.jpg?X-Amz-...` |
+
+<Note>
+  r2Vault auto-copies **public URLs** after upload if you have a custom domain configured. Use presigned URLs for secure, time-limited access.
+</Note>
+
+## File Operations Reference
+
+### Supported Operations
+
+| Operation | Method | API Call |
+|-----------|--------|----------|
+| Create folder | PUT | `PUT /<bucket>/<folder>/` with `Content-Length: 0` |
+| Delete file | DELETE | `DELETE /<bucket>/<key>` |
+| Delete folder | DELETE (recursive) | List all keys with prefix, then batch DELETE |
+| Generate presigned URL | Signature | AWS SigV4 with query parameters |
+| Copy URL | Read-only | Constructs URL from credentials + key |
+
+### API Compatibility
+
+r2Vault uses the **S3-compatible API** provided by Cloudflare R2:
+
+- **Endpoint**: `https://<account>.r2.cloudflarestorage.com`
+- **Authentication**: AWS Signature Version 4 (HMAC-SHA256)
+- **Supported operations**: GET, PUT, DELETE, HEAD, ListObjectsV2
+
+Source:
+- `R2BrowseService.swift` (source: `Fiaxe/Services/R2BrowseService.swift`)
+- `R2UploadService.swift` (source: `Fiaxe/Services/R2UploadService.swift`)
+- `AWSV4Signer.swift` (source: `Fiaxe/Services/AWSV4Signer.swift`)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browsing Files" icon="folder-open" href="/guide/browsing">
+    Navigate folders, search, and preview files
+  </Card>
+  <Card title="Uploading Files" icon="cloud-arrow-up" href="/guide/uploading">
+    Learn about drag-and-drop and concurrent uploads
+  </Card>
+</CardGroup>

@@ -1,0 +1,430 @@
+---
+title: Upload System
+description: Fast, reliable concurrent uploads with real-time progress tracking and automatic URL generation
+---
+
+The r2Vault upload system is built for speed and reliability, with support for concurrent uploads, per-file progress tracking, and automatic public URL generation.
+
+## Concurrent Upload Architecture
+
+r2Vault uploads multiple files simultaneously using Swift's structured concurrency, maximizing your upload speed while respecting R2's limits.
+
+```swift AppViewModel.swift:472-494
+private func uploadPendingTasks() async {
+    guard let credentials else {
+        showError("Please configure R2 credentials in Settings first (Cmd+,).")
+        return
+    }
+
+    let pending = uploadTasks.filter { $0.status == .pending }
+    await withTaskGroup(of: Void.self) { group in
+        for uploadTask in pending {
+            // Create and store the task handle on MainActor before it runs,
+            // so the cancel button can reach it immediately.
+            let handle = Task {
+                await self.uploadSingleFile(uploadTask, credentials: credentials)
+            }
+            await MainActor.run { uploadTask.uploadTask = handle }
+            group.addTask {
+                await handle.value
+                await MainActor.run { uploadTask.uploadTask = nil }
+            }
+        }
+    }
+}
+```
+
+<Info>
+Each upload runs in its own concurrent task, allowing multiple files to upload simultaneously while maintaining full control over individual uploads.
+</Info>
+
+## Upload Service
+
+The core upload logic uses Cloudflare R2's S3-compatible API with AWS V4 signature authentication:
+
+```swift R2UploadService.swift:19-50
+static func upload(
+    fileURL: URL,
+    credentials: R2Credentials,
+    key: String,
+    contentType: String,
+    onProgress: @MainActor @escaping @Sendable (Int64, Int64) -> Void
+) async throws -> UploadResult {
+    let url = await credentials.endpoint
+        .appendingPathComponent(credentials.bucketName)
+        .appendingPathComponent(key)
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "PUT"
+    request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+
+    let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+    request.setValue("\(fileSize)", forHTTPHeaderField: "Content-Length")
+
+    let signedRequest = AWSV4Signer.sign(
+        request: request,
+        credentials: credentials,
+        payloadHash: "UNSIGNED-PAYLOAD"
+    )
+
+    let delegate = UploadProgressDelegate(onProgress: onProgress)
+    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    defer { session.finishTasksAndInvalidate() }
+
+    let (data, response) = try await session.upload(for: signedRequest, fromFile: fileURL)
+    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+    return UploadResult(httpStatusCode: statusCode, responseBody: data)
+}
+```
+
+<Check>
+Files are uploaded directly from disk using `URLSession.upload(for:fromFile:)`, which streams the file without loading it entirely into memory.
+</Check>
+
+## Progress Tracking
+
+Each upload task tracks its progress in real-time using a custom URLSession delegate:
+
+```swift R2UploadService.swift:73-94
+private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let onProgress: @MainActor @Sendable (Int64, Int64) -> Void
+
+    init(onProgress: @MainActor @escaping @Sendable (Int64, Int64) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        let handler = onProgress
+        let sent = totalBytesSent
+        let total = totalBytesExpectedToSend
+        Task { @MainActor in
+            handler(sent, total)
+        }
+    }
+}
+```
+
+The progress callback updates the UI in real-time:
+
+```swift AppViewModel.swift:545-555
+let result = try await R2UploadService.upload(
+    fileURL: resolvedFileURL,
+    credentials: credentials,
+    key: key,
+    contentType: contentType,
+    onProgress: { [weak uploadTask] sent, total in
+        guard let uploadTask else { return }
+        uploadTask.progress = total > 0 ? Double(sent) / Double(total) : 0
+    }
+)
+```
+
+<Tip>
+Progress is calculated as `bytesSent / totalBytes`, displayed as a percentage in the UI.
+</Tip>
+
+## Upload Task Model
+
+Each upload is represented by a `FileUploadTask` observable object:
+
+```swift UploadTask.swift:1-46
+@Observable
+final class FileUploadTask: Identifiable {
+    let id: UUID
+    let fileName: String
+    let fileSize: Int64
+    let fileURL: URL
+
+    var progress: Double = 0  // 0.0 – 1.0
+    var status: Status = .pending
+    var errorMessage: String?
+    var resultURL: URL?
+    /// When set, used as the full R2 key instead of generating a random-prefix key.
+    /// Used for folder-aware uploads from the browser.
+    var uploadKey: String?
+    /// Security-scoped bookmark for a parent folder (used when uploading folders).
+    var parentFolderBookmark: Data?
+    /// Security-scoped bookmark for the file itself (used when uploading individual files via file picker).
+    var fileBookmark: Data?
+
+    enum Status: Sendable {
+        case pending
+        case uploading
+        case completed
+        case failed
+        case cancelled
+    }
+
+    /// The running upload task — held so it can be cancelled.
+    var uploadTask: Task<Void, Never>?
+
+    init(fileURL: URL, fileName: String, fileSize: Int64) {
+        self.id = UUID()
+        self.fileURL = fileURL
+        self.fileName = fileName
+        self.fileSize = fileSize
+    }
+
+    func cancel() {
+        uploadTask?.cancel()
+        uploadTask = nil
+        status = .cancelled
+    }
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Pending" icon="clock">
+    Waiting in queue to start
+  </Card>
+  <Card title="Uploading" icon="cloud-arrow-up">
+    Currently uploading with progress
+  </Card>
+  <Card title="Completed" icon="check">
+    Successfully uploaded
+  </Card>
+  <Card title="Failed" icon="xmark">
+    Upload failed with error message
+  </Card>
+</CardGroup>
+
+## Cancel Functionality
+
+Any upload can be cancelled at any time by clicking the cancel button:
+
+```swift UploadTask.swift:41-45
+func cancel() {
+    uploadTask?.cancel()
+    uploadTask = nil
+    status = .cancelled
+}
+```
+
+The upload service handles cancellation gracefully:
+
+```swift AppViewModel.swift:584-587
+catch is CancellationError {
+    if uploadTask.status != .cancelled {
+        uploadTask.status = .cancelled
+    }
+}
+```
+
+<Warning>
+Cancelling an upload stops the transfer immediately. Partial data may be uploaded to R2 but will not be accessible.
+</Warning>
+
+## Upload History
+
+Successful uploads are automatically saved to local history:
+
+```swift AppViewModel.swift:557-578
+if (200...299).contains(result.httpStatusCode) {
+    let publicURL = credentials.publicURL(forKey: key)
+    uploadTask.resultURL = publicURL
+    uploadTask.progress = 1.0
+    uploadTask.status = .completed
+    loadCurrentFolder()
+
+    let item = UploadItem(
+        fileName: uploadTask.fileName,
+        fileSize: uploadTask.fileSize,
+        r2Key: key,
+        publicURL: publicURL
+    )
+    historyStore.add(item)
+    copyToClipboard(publicURL.absoluteString)
+    clipboardToastFileName = uploadTask.fileName
+    Task { @MainActor in
+        try? await Task.sleep(for: .seconds(2.5))
+        if clipboardToastFileName == uploadTask.fileName {
+            clipboardToastFileName = nil
+        }
+    }
+}
+```
+
+<Info>
+Upload history is persisted locally and survives app restarts. You can view and manage your upload history from the menu bar widget.
+</Info>
+
+## Public URL Generation
+
+Every uploaded file automatically gets a public URL that's copied to your clipboard:
+
+```swift
+let publicURL = credentials.publicURL(forKey: key)
+// Returns: https://{accountId}.r2.cloudflarestorage.com/{bucketName}/{key}
+```
+
+The URL format follows R2's standard public URL pattern:
+
+<CodeGroup>
+```text Example
+https://abc123.r2.cloudflarestorage.com/my-bucket/uuid-photo.jpg
+```
+
+```text Format
+https://{accountId}.r2.cloudflarestorage.com/{bucketName}/{key}
+```
+</CodeGroup>
+
+<Note>
+For custom domains, you can configure your R2 bucket with a CNAME record. The public URL will use your custom domain instead of the default R2 URL.
+</Note>
+
+## Security-Scoped Bookmarks
+
+On macOS, apps require explicit permission to access user files. r2Vault uses security-scoped bookmarks to maintain access to files across background tasks:
+
+```swift AppViewModel.swift:435-446
+// Save a security-scoped bookmark while we still have access,
+// so uploadSingleFile can re-open the file later on a background task.
+let bookmark = try? url.bookmarkData(options: [.withSecurityScope],
+                                     includingResourceValuesForKeys: nil,
+                                     relativeTo: nil)
+
+let task = FileUploadTask(fileURL: url, fileName: fileName, fileSize: fileSize)
+task.fileBookmark = bookmark
+if !currentPrefix.isEmpty {
+    task.uploadKey = currentPrefix + fileName
+}
+tasks.append(task)
+```
+
+The bookmark is resolved when the upload actually runs:
+
+```swift AppViewModel.swift:518-533
+var resolvedFileURL = fileURL
+var fileAccessing = false
+if let bookmark = uploadTask.fileBookmark {
+    var isStale = false
+    if let resolved = try? URL(resolvingBookmarkData: bookmark,
+                               options: [.withSecurityScope],
+                               relativeTo: nil,
+                               bookmarkDataIsStale: &isStale) {
+        resolvedFileURL = resolved
+        fileAccessing = resolved.startAccessingSecurityScopedResource()
+    }
+} else {
+    fileAccessing = fileURL.startAccessingSecurityScopedResource()
+}
+defer { if fileAccessing { resolvedFileURL.stopAccessingSecurityScopedResource() } }
+```
+
+<Check>
+This approach allows r2Vault to upload files even after the file picker dialog is closed, and supports cancellation and retry without requiring permission again.
+</Check>
+
+## Folder Uploads
+
+When you upload a folder, r2Vault recursively enumerates all files and preserves the folder structure:
+
+```swift AppViewModel.swift:371-403
+if isDirectory.boolValue {
+    // Recursively enumerate directory contents
+    let dirName = url.lastPathComponent
+    let folderBookmark = try? url.bookmarkData(options: [.withSecurityScope],
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil)
+    guard let enumerator = FileManager.default.enumerator(
+        at: url,
+        includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+        options: [.skipsHiddenFiles]
+    ) else { continue }
+
+    for case let fileURL as URL in enumerator {
+        let fileAccessing = fileURL.startAccessingSecurityScopedResource()
+        defer { if fileAccessing { fileURL.stopAccessingSecurityScopedResource() } }
+
+        let values = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+        guard values?.isDirectory == false else { continue }
+
+        // Preserve relative path: dirName/relative/path/to/file
+        let relativePath = fileURL.path.replacingOccurrences(
+            of: url.deletingLastPathComponent().path + "/",
+            with: ""
+        )
+        let r2Key = currentPrefix + relativePath
+        let fileName = fileURL.lastPathComponent
+        let fileSize = Int64(values?.fileSize ?? 0)
+
+        let task = FileUploadTask(fileURL: fileURL, fileName: fileName, fileSize: fileSize)
+        task.uploadKey = r2Key
+        task.parentFolderBookmark = folderBookmark
+        tasks.append(task)
+    }
+}
+```
+
+<Tip>
+Hidden files (those starting with `.`) are automatically skipped during folder uploads.
+</Tip>
+
+## MIME Type Detection
+
+The upload system automatically detects the correct MIME type for each file:
+
+```swift AppViewModel.swift:681-686
+private func mimeType(for url: URL) -> String {
+    if let type = UTType(filenameExtension: url.pathExtension) {
+        return type.preferredMIMEType ?? "application/octet-stream"
+    }
+    return "application/octet-stream"
+}
+```
+
+The MIME type is sent in the `Content-Type` header:
+
+```swift R2UploadService.swift:32
+request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+```
+
+<Info>
+Correct MIME types ensure files are served with proper headers when accessed via their public URLs.
+</Info>
+
+## Error Handling
+
+Upload failures are captured with detailed error messages:
+
+```swift AppViewModel.swift:579-591
+if (200...299).contains(result.httpStatusCode) {
+    // Success path...
+} else {
+    let body = String(data: result.responseBody, encoding: .utf8) ?? "Unknown error"
+    uploadTask.status = .failed
+    uploadTask.errorMessage = "HTTP \(result.httpStatusCode): \(body)"
+}
+
+// Handle other errors
+catch is CancellationError {
+    if uploadTask.status != .cancelled {
+        uploadTask.status = .cancelled
+    }
+} catch {
+    uploadTask.status = .failed
+    uploadTask.errorMessage = error.localizedDescription
+}
+```
+
+<Warning>
+Failed uploads remain in the queue with their error message visible. You'll need to remove them manually or retry the operation.
+</Warning>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="File Browser" icon="folder-tree" href="/features/file-browser">
+    Upload files from the main browser interface
+  </Card>
+  <Card title="Menu Bar Widget" icon="square-terminal" href="/features/menu-bar-widget">
+    Quick uploads from the menu bar
+  </Card>
+</CardGroup>

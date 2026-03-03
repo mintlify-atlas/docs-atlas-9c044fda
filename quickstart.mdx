@@ -1,80 +1,213 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get up and running with r2Vault in 5 minutes
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through configuring r2Vault and uploading your first file to Cloudflare R2.
 
-### Step 1: Set up your local environment
+## Step 1: Launch r2Vault
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+After [installing r2Vault](/installation), launch the app from your Applications folder or Spotlight. You'll see the r2Vault icon appear in your **menu bar** (top-right corner). Click the icon to open the popover interface.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  r2Vault runs **exclusively in the menu bar**—no Dock icon, no app switcher presence. It's designed to stay out of your way until you need it.
 </Note>
+
+## Step 2: Configure R2 Credentials
+
+To connect r2Vault to your Cloudflare R2 bucket, you'll need to configure your credentials.
+
+<Steps>
+  <Step title="Open Settings">
+    Press **⌘,** (Command-Comma) or click the **gear icon** in the menu bar popover, then select **Settings**.
+  </Step>
+  
+  <Step title="Get your Cloudflare R2 credentials">
+    You'll need the following information from your Cloudflare dashboard:
+
+    - **Account ID**: Found in the Cloudflare dashboard sidebar
+    - **Access Key ID**: From an R2 API token
+    - **Secret Access Key**: From the same R2 API token
+    - **Bucket Name**: The name of your R2 bucket
+    - **Custom Domain** (optional): If you've set up a custom domain for public URLs
+
+    <Note>
+      To create an R2 API token:
+      1. Go to **R2** in your Cloudflare dashboard
+      2. Click **Manage R2 API Tokens**
+      3. Click **Create API Token**
+      4. Select **Edit** permissions
+      5. Copy the Access Key ID and Secret Access Key
+    </Note>
+  </Step>
+  
+  <Step title="Enter your credentials">
+    Paste your credentials into the Settings form:
+
+    - **Account ID**: Your Cloudflare account ID
+    - **Access Key ID**: Your R2 API token access key
+    - **Secret Access Key**: Your R2 API token secret
+    - **Bucket Name**: The bucket you want to connect to
+    - **Custom Domain** (optional): Your custom domain URL (e.g., `https://cdn.example.com`)
+  </Step>
+  
+  <Step title="Test the connection">
+    Click **Test Connection** to verify your credentials are correct. If successful, you'll see a green **✓ Connected to R2** message.
+  </Step>
+  
+  <Step title="Save">
+    Click **Save** to store your credentials securely in the macOS Keychain.
+  </Step>
+</Steps>
+
+<Warning>
+  Your credentials are stored securely in the **macOS Keychain**. r2Vault never sends your credentials to any third-party service—all communication happens directly between your Mac and Cloudflare's R2 API.
+</Warning>
+
+## Step 3: Browse Your Bucket
+
+Once configured, r2Vault will automatically load your bucket contents. You can browse files in two modes:
+
+- **Icon view**: Grid layout with file icons
+- **List view**: Table layout with file details
+
+Use the **breadcrumb navigation** at the top to navigate folders, or double-click folders to open them.
+
+### Quick Look Preview
+
+Press **spacebar** while a file is selected to preview it with Quick Look—just like in Finder.
+
+## Step 4: Upload Your First File
+
+There are three ways to upload files to r2Vault:
+
+### Method 1: Drag and Drop (Recommended)
+
+1. Click the r2Vault menu bar icon to open the popover
+2. Drag files from Finder into the **drop zone**
+3. Watch the upload progress in real-time
+
+### Method 2: File Picker
+
+1. Click the **drop zone** in the menu bar popover
+2. Select files from the file picker dialog
+3. Click **Open** to start uploading
+
+### Method 3: Upload from Main Window
+
+1. Open the main r2Vault window (click **Open R2 Vault** in the menu bar popover)
+2. Click **Upload Files…** button
+3. Select files and click **Open**
+
+<Note>
+  r2Vault supports **concurrent uploads**—you can upload multiple files at once, and each one will have its own progress bar.
+</Note>
+
+## Step 5: Copy Public URL
+
+After a successful upload, r2Vault **automatically copies the public URL** to your clipboard. You'll see a "Link copied!" toast notification. You can also copy the URL later from the **Recent Uploads** list in the menu bar popover.
+
+## Real-World Workflow Example
+
+Here's a typical workflow using r2Vault:
+
+<Steps>
+  <Step title="Take a screenshot">
+    Press **⌘⇧4** (Command-Shift-4) to take a screenshot on macOS.
+  </Step>
+  
+  <Step title="Upload instantly">
+    Drag the screenshot from your Desktop directly onto the r2Vault menu bar icon. The popover opens automatically, and the upload starts immediately.
+  </Step>
+  
+  <Step title="Share the URL">
+    The public URL is automatically copied to your clipboard. Paste it into Slack, Discord, email, or wherever you need to share the image.
+
+    ```
+    https://youraccount.r2.cloudflarestorage.com/yourbucket/abc12345-screenshot.png
+    ```
+  </Step>
+  
+  <Step title="View upload history">
+    All your uploads are saved in the **Recent Uploads** list. Click the **link icon** to copy the URL again, or the **trash icon** to delete from R2.
+  </Step>
+</Steps>
+
+<Note>
+  If you've configured a **custom domain** in Settings, the public URL will use your custom domain instead of the default R2 URL.
+</Note>
+
+## Managing Multiple Buckets
+
+r2Vault supports connecting to multiple R2 buckets. To add another bucket:
+
+<Steps>
+  <Step title="Open Settings">
+    Press **⌘,** to open Settings.
+  </Step>
+  
+  <Step title="Add New Connection">
+    Click **Add New** in the Connections section.
+  </Step>
+  
+  <Step title="Enter credentials for the new bucket">
+    Fill in the Account ID, Access Key, Secret Key, and Bucket Name for your second bucket.
+  </Step>
+  
+  <Step title="Save">
+    Click **Save** to add the new connection.
+  </Step>
+</Steps>
+
+To switch between buckets, click the **gear icon** in the menu bar popover and select the bucket from the **Switch Bucket** menu.
+
+## Next Steps
+
+Now that you're up and running, explore more features:
+
+<CardGroup cols={2}>
+  <Card title="File Management" icon="folder" href="/guide/managing-files">
+    Create folders, delete files, and organize your bucket
+  </Card>
+  <Card title="Menu Bar Widget" icon="square-up-right" href="/features/menu-bar-widget">
+    Master the menu bar interface for lightning-fast uploads
+  </Card>
+  <Card title="Upload System" icon="cloud-arrow-up" href="/features/upload-system">
+    Learn more about the upload system and history
+  </Card>
+  <Card title="File Browser" icon="folder-open" href="/features/file-browser">
+    Explore the file browser features
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Connection failed
+
+If the **Test Connection** fails:
+
+- Double-check your Account ID, Access Key, and Secret Key
+- Verify the bucket name is correct (case-sensitive)
+- Ensure your R2 API token has **Edit** permissions
+- Check that your Cloudflare account has an active R2 subscription
+
+### Upload failed
+
+If an upload fails:
+
+- Check your internet connection
+- Verify your R2 API token hasn't expired
+- Ensure you haven't exceeded your R2 storage quota
+- Check the file size—R2 has a 5GB per-object limit
+
+### Public URL doesn't work
+
+By default, R2 buckets are **private**. To make objects publicly accessible:
+
+1. Go to your Cloudflare dashboard
+2. Navigate to **R2 → Your Bucket → Settings**
+3. Enable **Public Access** or set up a custom domain
+
+Alternatively, use **presigned URLs** for temporary, secure sharing (coming in a future r2Vault release).

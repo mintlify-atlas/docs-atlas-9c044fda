@@ -1,0 +1,287 @@
+---
+title: "KeychainService"
+description: "Credential storage service using UserDefaults"
+---
+
+## Overview
+
+`KeychainService` provides persistent storage for R2 credentials. Despite its name, this implementation uses `UserDefaults` rather than the system Keychain, which is appropriate for a personal single-user tool where credentials are stored on the user's own machine.
+
+<Info>
+  Located at: `Fiaxe/Services/KeychainService.swift:6`
+</Info>
+
+<Warning>
+  This service stores credentials in plain text in UserDefaults. For production applications handling sensitive credentials for multiple users, consider using the system Keychain (Security framework) or encrypted storage.
+</Warning>
+
+## Type Definition
+
+```swift
+enum KeychainService
+```
+
+Implemented as an enum with static methods (no instances).
+
+## Methods
+
+### saveAll()
+
+Saves an array of R2 credentials to persistent storage.
+
+```swift
+static func saveAll(_ credentials: [R2Credentials]) throws
+```
+
+<ParamField path="credentials" type="[R2Credentials]" required>
+  Array of R2 credentials to save. Replaces any previously saved credentials.
+</ParamField>
+
+**Throws:** Encoding errors if the credentials cannot be serialized to JSON.
+
+#### Implementation Details
+
+```swift
+// Example from KeychainService.swift:9-12
+static func saveAll(_ credentials: [R2Credentials]) throws {
+    let data = try JSONEncoder().encode(credentials)
+    UserDefaults.standard.set(data, forKey: storageKey)
+}
+```
+
+The method:
+1. Encodes the credentials array to JSON using `JSONEncoder`
+2. Stores the JSON data in `UserDefaults` under the key `"fiaxe.r2credentials"`
+3. Automatically synchronizes to disk via `UserDefaults`
+
+### loadAll()
+
+Retrieves all stored R2 credentials from persistent storage.
+
+```swift
+static func loadAll() throws -> [R2Credentials]
+```
+
+**Returns:** Array of stored R2 credentials. Returns an empty array if no credentials are stored.
+
+**Throws:** Decoding errors if the stored data cannot be deserialized.
+
+#### Implementation Details
+
+```swift
+// Example from KeychainService.swift:14-23
+static func loadAll() throws -> [R2Credentials] {
+    guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [] }
+    if let decoded = try? JSONDecoder().decode([R2Credentials].self, from: data) {
+        return decoded
+    }
+    if let single = try? JSONDecoder().decode(R2Credentials.self, from: data) {
+        return [single]
+    }
+    return []
+}
+```
+
+The method handles migration from older versions:
+1. Attempts to load data from `UserDefaults`
+2. If no data exists, returns an empty array
+3. First tries to decode as an array of credentials (current format)
+4. Falls back to decoding a single credential object (legacy format)
+5. Automatically wraps legacy single credential in an array
+6. Returns empty array if decoding fails
+
+### deleteAll()
+
+Removes all stored credentials from persistent storage.
+
+```swift
+static func deleteAll() throws
+```
+
+**Throws:** No errors are thrown in the current implementation.
+
+#### Implementation Details
+
+```swift
+// Example from KeychainService.swift:25-27
+static func deleteAll() throws {
+    UserDefaults.standard.removeObject(forKey: storageKey)
+}
+```
+
+Simply removes the stored data from `UserDefaults`.
+
+## Storage Implementation
+
+The service uses a simple key-value approach:
+
+```swift
+private static let storageKey = "fiaxe.r2credentials"
+```
+
+All credentials are stored as JSON data under this single key in `UserDefaults`.
+
+## Data Format
+
+Credentials are stored as JSON-encoded `R2Credentials` objects:
+
+```swift
+struct R2Credentials: Codable, Sendable {
+    let accountId: String
+    let accessKeyId: String
+    let secretAccessKey: String
+    let bucketName: String
+    // ... other fields
+}
+```
+
+Stored JSON format:
+```json
+[
+  {
+    "accountId": "your-account-id",
+    "accessKeyId": "your-access-key-id",
+    "secretAccessKey": "your-secret-access-key",
+    "bucketName": "my-bucket"
+  },
+  // ... more credentials
+]
+```
+
+## Usage Examples
+
+```swift
+// Save credentials
+let credentials = [
+    R2Credentials(
+        accountId: "account-1",
+        accessKeyId: "key-1",
+        secretAccessKey: "secret-1",
+        bucketName: "bucket-1"
+    ),
+    R2Credentials(
+        accountId: "account-2",
+        accessKeyId: "key-2",
+        secretAccessKey: "secret-2",
+        bucketName: "bucket-2"
+    )
+]
+
+try KeychainService.saveAll(credentials)
+
+// Load credentials
+let storedCredentials = try KeychainService.loadAll()
+print("Loaded \(storedCredentials.count) credential(s)")
+
+for cred in storedCredentials {
+    print("Bucket: \(cred.bucketName)")
+}
+
+// Delete all credentials
+try KeychainService.deleteAll()
+```
+
+## Migration Support
+
+The `loadAll()` method includes backward compatibility:
+
+```swift
+// Old format (single credential)
+{
+  "accountId": "...",
+  "accessKeyId": "...",
+  // ...
+}
+
+// New format (array of credentials)
+[
+  { "accountId": "...", ... },
+  { "accountId": "...", ... }
+]
+```
+
+Both formats are automatically handled, with single credentials wrapped in an array.
+
+## Security Considerations
+
+<Warning>
+  **Security Trade-offs**
+  
+  This implementation prioritizes simplicity for a personal tool:
+  
+  - **Pro:** Simple implementation, no Keychain complexity
+  - **Pro:** Appropriate for single-user, local-only tools
+  - **Con:** Credentials stored in plain text
+  - **Con:** Accessible to other processes with UserDefaults access
+  - **Con:** Included in Time Machine backups
+  
+  For production multi-user apps, use the system Keychain:
+  ```swift
+  import Security
+  
+  // Store in Keychain
+  let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrAccount as String: "r2credentials",
+      kSecValueData as String: data
+  ]
+  SecItemAdd(query as CFDictionary, nil)
+  ```
+</Warning>
+
+## When to Use UserDefaults vs Keychain
+
+**Use UserDefaults (current approach) when:**
+- Building a personal single-user tool
+- Credentials are for the user's own accounts
+- Simplicity is more important than maximum security
+- Running on the user's own trusted machine
+
+**Use Keychain when:**
+- Building a production app for distribution
+- Handling credentials for multiple users
+- Need encrypted storage
+- Require secure credential synchronization
+- Need to prevent unauthorized access
+
+## Persistence Guarantees
+
+<Note>
+  `UserDefaults` automatically persists changes to disk, but synchronization is asynchronous. For critical operations, you can force synchronization:
+  
+  ```swift
+  UserDefaults.standard.set(data, forKey: key)
+  UserDefaults.standard.synchronize()  // Force write to disk
+  ```
+  
+  However, this is rarely necessary as the system handles synchronization reliably.
+</Note>
+
+## Testing
+
+For testing, you can use a separate `UserDefaults` suite:
+
+```swift
+// In your test code
+let testDefaults = UserDefaults(suiteName: "com.example.tests")!
+
+// Modify KeychainService to accept a UserDefaults instance
+enum KeychainService {
+    static var defaults: UserDefaults = .standard
+    
+    static func saveAll(_ credentials: [R2Credentials]) throws {
+        let data = try JSONEncoder().encode(credentials)
+        defaults.set(data, forKey: storageKey)
+    }
+    // ...
+}
+
+// In tests
+KeychainService.defaults = testDefaults
+```
+
+## Related Services
+
+- [R2UploadService](/dev/services/r2-upload-service) - Uses credentials for uploads
+- [R2BrowseService](/dev/services/r2-browse-service) - Uses credentials for browsing
+- [AWSV4Signer](/dev/services/aws-v4-signer) - Uses credentials for request signing

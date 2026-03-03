@@ -1,0 +1,148 @@
+---
+title: Configuration & Settings
+description: Configure your R2 credentials and manage multiple buckets in r2Vault
+---
+
+## Opening Settings
+
+Access the settings window using the keyboard shortcut:
+
+<kbd>⌘</kbd> + <kbd>,</kbd>
+
+Or select **Settings** from the app menu.
+
+## R2 Credentials Setup
+
+r2Vault requires four essential credentials to connect to your Cloudflare R2 bucket:
+
+<Steps>
+  <Step title="Account ID">
+    Your Cloudflare account identifier. Find this in the R2 dashboard URL or your Cloudflare account settings.
+    
+    ```
+    https://<account-id>.r2.cloudflarestorage.com
+    ```
+  </Step>
+  
+  <Step title="Access Key ID">
+    The public part of your R2 API token. Generate this from **R2 > Manage R2 API Tokens** in your Cloudflare dashboard.
+  </Step>
+  
+  <Step title="Secret Access Key">
+    The private part of your R2 API token. This is shown only once when you create the token — store it securely.
+    
+    <Warning>
+      r2Vault stores credentials in the macOS Keychain with secure encryption.
+    </Warning>
+  </Step>
+  
+  <Step title="Bucket Name">
+    The name of the R2 bucket you want to access (e.g., `my-uploads`, `cdn-assets`).
+  </Step>
+</Steps>
+
+### Test Connection
+
+After entering your credentials, click **Test Connection** to verify:
+
+- Account ID and bucket name are correct
+- Access keys have proper permissions
+- Network connectivity to Cloudflare R2
+
+A successful test shows:
+
+<Check>
+  ✓ Connected to R2
+</Check>
+
+## Custom Domain (Optional)
+
+If you've configured a custom domain for your R2 bucket, enter it in the **Custom Domain** field:
+
+```
+https://cdn.example.com
+```
+
+<Note>
+  Include the full URL with `https://` scheme. This domain will be used to generate public URLs for uploaded files instead of the default R2 endpoint.
+</Note>
+
+### How Custom Domains Work
+
+With a custom domain configured:
+
+- **Without custom domain**: `https://<account>.r2.cloudflarestorage.com/<bucket>/<file>`
+- **With custom domain**: `https://cdn.example.com/<file>`
+
+The custom domain is used when:
+- Auto-copying URLs to clipboard after upload
+- Generating presigned download URLs
+- Displaying URLs in the upload history
+
+## Multiple Bucket Support
+
+r2Vault can manage multiple R2 buckets from the same or different Cloudflare accounts.
+
+### Adding a New Bucket
+
+1. Open Settings (`⌘,`)
+2. Select **New Connection** from the **Bucket** dropdown
+3. Enter credentials for the new bucket
+4. Click **Save**
+
+The new bucket is automatically selected and appears in the browser.
+
+### Switching Between Buckets
+
+From the **Settings** window:
+
+<Steps>
+  <Step title="Open the Bucket picker">
+    Click the **Bucket** dropdown at the top of the settings form.
+  </Step>
+  
+  <Step title="Select a bucket">
+    Choose from your saved buckets. The bucket name is displayed for each connection.
+  </Step>
+  
+  <Step title="Auto-load">
+    The browser view refreshes automatically to show the selected bucket's contents.
+  </Step>
+</Steps>
+
+<Tip>
+  You can also switch buckets from the **menu bar widget** — see [Menu Bar](/guide/menu-bar) for details.
+</Tip>
+
+### Deleting a Bucket Connection
+
+<Warning>
+  This only removes the credentials from r2Vault — it does **not** delete the bucket or its contents from Cloudflare.
+</Warning>
+
+1. Select the bucket from the dropdown
+2. Click **Delete**
+3. Confirm the action
+
+If you delete the currently active bucket, r2Vault automatically switches to the first available bucket.
+
+## Credential Storage
+
+All credentials are stored securely in the macOS Keychain using these conventions:
+
+- **Service**: `com.r2vault.credentials`
+- **Account**: The bucket's unique UUID identifier
+- **Data**: Encrypted JSON containing account ID, access keys, bucket name, and custom domain
+
+Source: `KeychainService.swift` (source: `Fiaxe/Services/KeychainService.swift`)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browse Files" icon="folder-open" href="/guide/browsing">
+    Navigate your bucket with the Finder-style interface
+  </Card>
+  <Card title="Upload Files" icon="arrow-up" href="/guide/uploading">
+    Drag and drop files to upload with live progress
+  </Card>
+</CardGroup>

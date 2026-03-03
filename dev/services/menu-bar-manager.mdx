@@ -1,0 +1,343 @@
+---
+title: "MenuBarManager"
+description: "Menu bar status item and popover management for macOS"
+---
+
+## Overview
+
+`MenuBarManager` manages a persistent `NSStatusItem` and `NSPopover` for the r2Vault menu bar widget. The popover uses `.applicationDefined` behavior to remain open even when the app loses focus, requiring explicit user interaction to dismiss.
+
+<Info>
+  Located at: `Fiaxe/Services/MenuBarManager.swift:17`
+</Info>
+
+## Type Definition
+
+```swift
+@MainActor
+final class MenuBarManager: NSObject
+```
+
+Must run on the main actor since it manages AppKit UI components.
+
+## Initialization
+
+```swift
+init(viewModel: AppViewModel)
+```
+
+<ParamField path="viewModel" type="AppViewModel" required>
+  The app's view model, injected into the SwiftUI environment for the popover content.
+</ParamField>
+
+The initializer sets up both the status item and popover:
+
+```swift
+// Example from MenuBarManager.swift:22-27
+init(viewModel: AppViewModel) {
+    self.viewModel = viewModel
+    super.init()
+    setupStatusItem()
+    setupPopover()
+}
+```
+
+## Properties
+
+### statusItem
+
+```swift
+private var statusItem: NSStatusItem!
+```
+
+The menu bar status item displayed in the system status bar (menu bar).
+
+### popover
+
+```swift
+private var popover: NSPopover!
+```
+
+The popover shown when the status item is clicked.
+
+### viewModel
+
+```swift
+private let viewModel: AppViewModel
+```
+
+The app's view model passed to the SwiftUI popover content.
+
+## Setup Methods
+
+### setupStatusItem()
+
+Configures the menu bar status item.
+
+```swift
+private func setupStatusItem()
+```
+
+#### Implementation Details
+
+```swift
+// Example from MenuBarManager.swift:31-39
+private func setupStatusItem() {
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    if let button = statusItem.button {
+        button.image = NSImage(systemSymbolName: "arrow.up.to.line.compact",
+                               accessibilityDescription: "R2 Vault")
+        button.action = #selector(togglePopover)
+        button.target = self
+    }
+}
+```
+
+The method:
+1. Creates a status item with square dimensions (typically 22x22 points)
+2. Sets an SF Symbol icon: `arrow.up.to.line.compact` (upload icon)
+3. Configures accessibility description for VoiceOver
+4. Connects the button's action to `togglePopover`
+
+### setupPopover()
+
+Configures the popover with SwiftUI content.
+
+```swift
+private func setupPopover()
+```
+
+#### Implementation Details
+
+```swift
+// Example from MenuBarManager.swift:41-53
+private func setupPopover() {
+    popover = NSPopover()
+    popover.contentSize = NSSize(width: 300, height: 400)
+    // .applicationDefined = popover stays open when app loses focus
+    popover.behavior = .applicationDefined
+    popover.animates = true
+
+    let hostingController = AlwaysActiveHostingController(
+        rootView: MenuBarView()
+            .environment(viewModel)
+    )
+    popover.contentViewController = hostingController
+}
+```
+
+Key configuration:
+- **Content size:** 300x400 points
+- **Behavior:** `.applicationDefined` - popover won't auto-dismiss when focus is lost
+- **Animation:** Enabled for smooth show/hide transitions
+- **Content:** SwiftUI `MenuBarView` wrapped in `AlwaysActiveHostingController`
+
+<Note>
+  The `.applicationDefined` behavior means the popover only dismisses when:
+  - User clicks the status bar icon again
+  - User explicitly closes it via UI
+  - App calls `popover.performClose(nil)`
+  
+  It will NOT dismiss when:
+  - User clicks outside the popover
+  - App loses focus
+  - User switches to another app
+</Note>
+
+## Toggle Method
+
+### togglePopover()
+
+Toggles the popover visibility when the status bar icon is clicked.
+
+```swift
+@objc private func togglePopover()
+```
+
+#### Implementation Details
+
+```swift
+// Example from MenuBarManager.swift:57-67
+@objc private func togglePopover() {
+    if popover.isShown {
+        popover.performClose(nil)
+    } else {
+        guard let button = statusItem.button else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+        // Force the popover window to always appear active so colors never desaturate
+        popover.contentViewController?.view.window?.makeKey()
+    }
+}
+```
+
+When showing the popover:
+1. Shows it relative to the status bar button's bounds
+2. Positions it below the button (`.minY` edge)
+3. Activates the app, bringing it to the front
+4. Forces the popover window to become key window
+
+When hiding:
+- Calls `performClose(nil)` to dismiss the popover
+
+<Info>
+  The `NSApp.activate(ignoringOtherApps: true)` and `makeKey()` calls ensure the popover appears active and fully saturated even when other apps have focus.
+</Info>
+
+## AlwaysActiveHostingController
+
+A custom `NSHostingController` subclass that prevents content desaturation:
+
+```swift
+private final class AlwaysActiveHostingController<Content: View>: NSHostingController<Content> {
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeKey()
+    }
+}
+```
+
+### Purpose
+
+By default, AppKit windows become "inactive" when they lose key status, causing:
+- Colors to desaturate (appear washed out)
+- Controls to appear disabled
+- Reduced visual prominence
+
+This controller overrides `viewDidAppear()` to force the window to remain key, maintaining:
+- Full color saturation
+- Active appearance
+- Proper visual hierarchy
+
+<Note>
+  This is particularly important for menu bar apps that should maintain an "active" appearance even when the user interacts with other applications.
+</Note>
+
+## Popover Behavior Modes
+
+AppKit provides several popover behaviors:
+
+| Behavior | Auto-dismiss on focus loss | Auto-dismiss on outside click | Use case |
+|----------|---------------------------|------------------------------|----------|
+| `.applicationDefined` | No | No | Menu bar apps, persistent UI |
+| `.transient` | Yes | Yes | Tooltips, hints |
+| `.semitransient` | No | Yes | Inspectors, contextual UI |
+
+r2Vault uses `.applicationDefined` for maximum control.
+
+## SwiftUI Integration
+
+The popover hosts SwiftUI content via `NSHostingController`:
+
+```swift
+let hostingController = AlwaysActiveHostingController(
+    rootView: MenuBarView()
+        .environment(viewModel)
+)
+popover.contentViewController = hostingController
+```
+
+The view model is injected into the SwiftUI environment, making it accessible to all child views:
+
+```swift
+// In MenuBarView.swift
+struct MenuBarView: View {
+    @Environment(AppViewModel.self) private var viewModel
+    
+    var body: some View {
+        // Access viewModel properties
+    }
+}
+```
+
+## Usage Example
+
+```swift
+import SwiftUI
+
+@main
+struct R2VaultApp: App {
+    @State private var viewModel = AppViewModel()
+    @State private var menuBarManager: MenuBarManager?
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environment(viewModel)
+        }
+        .onAppear {
+            // Hide the dock icon for menu bar-only app
+            NSApplication.shared.setActivationPolicy(.accessory)
+            
+            // Setup menu bar
+            menuBarManager = MenuBarManager(viewModel: viewModel)
+        }
+    }
+}
+```
+
+## Lifecycle Management
+
+<Warning>
+  Keep a strong reference to `MenuBarManager` for the app's lifetime:
+  
+  ```swift
+  // In App or AppDelegate
+  private var menuBarManager: MenuBarManager?
+  
+  func applicationDidFinishLaunching(_ notification: Notification) {
+      menuBarManager = MenuBarManager(viewModel: viewModel)
+      // Don't let it deallocate!
+  }
+  ```
+  
+  If the manager deallocates, the status item will disappear from the menu bar.
+</Warning>
+
+## Menu Bar Icon Guidelines
+
+<Note>
+  **macOS Menu Bar Icon Best Practices:**
+  
+  - Use SF Symbols when possible (automatic dark mode support)
+  - Target size: 22x22 points (44x44 pixels @2x)
+  - Use template images (monochrome, system adjusts for light/dark mode)
+  - Keep designs simple and recognizable at small sizes
+  - Provide accessibility descriptions
+  
+  ```swift
+  // Template image (recommended)
+  let image = NSImage(systemSymbolName: "icon.name")
+  image?.isTemplate = true
+  
+  // Custom image
+  let customImage = NSImage(named: "MenuBarIcon")
+  customImage?.isTemplate = true  // Let system colorize
+  ```
+</Note>
+
+## Popover Positioning
+
+The popover is positioned relative to the status bar button:
+
+```swift
+popover.show(
+    relativeTo: button.bounds,  // Position relative to button
+    of: button,                  // Parent view
+    preferredEdge: .minY         // Show below button (minY = bottom edge)
+)
+```
+
+Edge options:
+- `.minY` - Below (most common for menu bar)
+- `.maxY` - Above
+- `.minX` - To the left
+- `.maxX` - To the right
+
+The system automatically adjusts position if the popover would go off-screen.
+
+## Related Components
+
+- [R2UploadService](/dev/services/r2-upload-service) - File upload functionality
+- [MenuBarView (SwiftUI)](#) - The SwiftUI content displayed in the popover
+- [AppViewModel](#) - The app's main view model

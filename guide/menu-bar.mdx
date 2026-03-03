@@ -1,0 +1,248 @@
+---
+title: Menu Bar Widget
+description: Upload files instantly from the menu bar with live progress and recent uploads
+---
+
+## Overview
+
+The r2Vault menu bar widget provides quick access to uploads without opening the main window:
+
+- **Drop zone** for instant file uploads
+- **Live progress** for active uploads
+- **Recent uploads** list with quick actions
+- **Bucket switcher** and settings
+
+<Info>
+  The menu bar widget is always accessible, even when the main window is closed.
+</Info>
+
+Source: `MenuBarView.swift` (source: `Fiaxe/Views/MenuBarView.swift:5-533`)
+
+## Drop Files to Upload Instantly
+
+The drop zone at the top of the menu bar widget accepts files from Finder:
+
+<Steps>
+  <Step title="Click the menu bar icon">
+    Opens the widget popover
+  </Step>
+  
+  <Step title="Drag files to the drop zone">
+    The zone highlights blue when a file is hovering:
+    
+    ```
+    ┌───────────────────────┐
+    │   ↓ Release to Upload │
+    └───────────────────────┘
+    ```
+  </Step>
+  
+  <Step title="Drop to upload">
+    Files are queued immediately and upload begins
+  </Step>
+</Steps>
+
+Alternatively, **click the drop zone** to open the system file picker.
+
+Implementation: `MenuBarView.swift:134-184` (source: `Fiaxe/Views/MenuBarView.swift:134-184`)
+
+### Upload Behavior
+
+- Files upload to the **root bucket** by default
+- If you've navigated to a folder in the main window, files upload to that folder instead
+- Folder uploads preserve directory structure (same as main window)
+
+<Tip>
+  The menu bar upload uses the same service as the main window, so progress syncs across both views.
+</Tip>
+
+## Live Progress Tracking
+
+While uploads are active, the widget displays a dedicated progress section:
+
+```
+┌─────────────────────────────┐
+│ ⟳ Uploading 2 of 5…         │
+│                  [Cancel All]│
+├─────────────────────────────┤
+│ ↑ photo.jpg           45%   │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                              │
+│ ⏱ video.mp4         Waiting │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━  │
+└─────────────────────────────┘
+```
+
+### Progress Elements
+
+<ParamField path="Status icon" type="icon">
+  - **↑** (Uploading) — Blue accent color
+  - **⏱** (Pending) — Gray secondary color
+</ParamField>
+
+<ParamField path="File name" type="string">
+  Truncates with middle ellipsis if too long: `very-long-file-n…ame.jpg`
+</ParamField>
+
+<ParamField path="Progress percentage" type="number">
+  Shows `0%` to `100%` with monospaced digits
+</ParamField>
+
+<ParamField path="Progress bar" type="visual">
+  Linear progress bar (blue for uploading, gray for pending)
+</ParamField>
+
+Source: `MenuBarView.swift:484-532` (source: `Fiaxe/Views/MenuBarView.swift:484-532`)
+
+### Cancel Uploads
+
+<CardGroup cols={2}>
+  <Card title="Cancel individual" icon="circle-xmark">
+    Click the **×** button next to any file
+  </Card>
+  
+  <Card title="Cancel all" icon="ban">
+    Click **Cancel All** in the progress header
+  </Card>
+</CardGroup>
+
+Cancelled uploads are removed from the queue immediately.
+
+## Recent Uploads List
+
+The bottom section displays up to **25 recent uploads** with quick actions:
+
+<Frame>
+  ```
+  RECENT UPLOADS                  [↗]
+  ┌─────────────────────────────┐
+  │ 📷 beach.jpg        2.4 MB   │  [🔗] [↓] [🗑]
+  │ 📄 report.pdf       856 KB   │
+  │ 🎬 demo.mp4         12.1 MB  │
+  └─────────────────────────────┘
+  ```
+</Frame>
+
+### File Icons
+
+Each file type has a color-coded icon badge:
+
+| Type | Icon | Color |
+|------|------|-------|
+| Images (JPG, PNG, GIF, etc.) | 📷 `photo.fill` | Purple |
+| Videos (MP4, MOV, etc.) | 🎬 `film.fill` | Pink |
+| Audio (MP3, WAV, etc.) | 🎵 `music.note` | Orange |
+| PDFs | 📄 `doc.richtext.fill` | Red |
+| Archives (ZIP, TAR, etc.) | 📦 `archivebox.fill` | Brown |
+| Code (Swift, JS, etc.) | `</>` | Blue |
+| Other | 📄 `doc.fill` | Blue |
+
+Implementation: `MenuBarView.swift:456-479` (source: `Fiaxe/Views/MenuBarView.swift:456-479`)
+
+### Quick Actions
+
+Hover over any recent upload to reveal action buttons:
+
+<AccordionGroup>
+  <Accordion title="Copy URL" icon="link">
+    Copies the public URL to clipboard. Shows a green checkmark (✓) on success.
+  </Accordion>
+  
+  <Accordion title="Download" icon="arrow-down">
+    Downloads the file to your **Downloads** folder using a presigned URL.
+  </Accordion>
+  
+  <Accordion title="Delete" icon="trash">
+    Permanently removes the file from R2. Shows a confirmation dialog:
+    
+    ```
+    Delete "photo.jpg"?
+    
+    This will permanently remove the file from R2
+    and cannot be undone.
+    
+    [Delete]  [Cancel]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+Source: `MenuBarView.swift:353-454` (source: `Fiaxe/Views/MenuBarView.swift:353-454`)
+
+## Gear Menu Options
+
+Click the **⚙️ gear icon** in the top-right to access:
+
+### Switch Bucket
+
+If you have multiple buckets configured:
+
+```
+SWITCH BUCKET
+  cdn-assets        ✓
+  backups
+  user-uploads
+```
+
+Click a bucket name to switch. The current bucket has a checkmark (✓).
+
+<Note>
+  Switching buckets refreshes the main window browser to show the new bucket's contents.
+</Note>
+
+### Other Menu Items
+
+- **Quit r2 Vault** — Closes the app entirely (⚠️ destructive action, shown in red)
+
+Implementation: `MenuBarView.swift:84-118` (source: `Fiaxe/Views/MenuBarView.swift:84-118`)
+
+## Link Copied Toast
+
+When an upload completes, a green toast notification appears at the bottom:
+
+<Frame>
+  ```
+  ┌─────────────────────────┐
+  │ ✓ Link copied!          │
+  │   photo.jpg             │
+  └─────────────────────────┘
+  ```
+</Frame>
+
+The toast:
+- Auto-dismisses after **2.5 seconds**
+- Truncates long filenames with middle ellipsis
+- Uses a glass effect background (macOS 26+) or green tint (older versions)
+
+Source: `MenuBarView.swift:42-65` (source: `Fiaxe/Views/MenuBarView.swift:42-65`)
+
+## Glass Effects (macOS 26+)
+
+On macOS 26 and later, the menu bar widget uses Apple's new **Glass API**:
+
+- **Drop zone**: `.glassEffect(.regular)` with accent color tint when targeted
+- **Gear button**: `.glassEffect(.regular.interactive())` for hover states
+- **Toast**: `.glassEffect(.regular.tint(.green))` for success feedback
+- **Action buttons**: `.glass` button style
+
+On older macOS versions, the widget gracefully falls back to standard fills and borders.
+
+Implementation: `MenuBarView.swift:299-349` (source: `Fiaxe/Views/MenuBarView.swift:299-349`)
+
+## Opening the Main Window
+
+Click the **↗** arrow button next to "Recent Uploads" to open the main browser window.
+
+If the window was previously closed, r2Vault creates a new one automatically.
+
+Source: `MenuBarView.swift:276-291` (source: `Fiaxe/Views/MenuBarView.swift:276-291`)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Files" icon="folder-gear" href="/guide/managing-files">
+    Create folders, delete files, and generate presigned URLs
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guide/configuration">
+    Add more buckets or update custom domains
+  </Card>
+</CardGroup>

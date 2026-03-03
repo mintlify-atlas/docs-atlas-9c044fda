@@ -1,0 +1,182 @@
+---
+title: 'FileUploadTask'
+description: 'Tracks state and progress of file uploads to R2'
+---
+
+## Overview
+
+The `FileUploadTask` class represents a pending or in-progress upload in the upload queue. It tracks upload progress, status, and provides cancellation support. This is an `@Observable` class designed for use with SwiftUI's observation framework.
+
+## Properties
+
+<ResponseField name="id" type="UUID" required>
+  Unique identifier for this upload task
+</ResponseField>
+
+<ResponseField name="fileName" type="String" required>
+  Name of the file being uploaded
+</ResponseField>
+
+<ResponseField name="fileSize" type="Int64" required>
+  Size of the file in bytes
+</ResponseField>
+
+<ResponseField name="fileURL" type="URL" required>
+  Local file system URL of the file to upload
+</ResponseField>
+
+<ResponseField name="progress" type="Double" default="0.0">
+  Upload progress from `0.0` (not started) to `1.0` (completed)
+</ResponseField>
+
+<ResponseField name="status" type="Status" default=".pending">
+  Current status of the upload task. See [Status Enum](#status-enum) below
+</ResponseField>
+
+<ResponseField name="errorMessage" type="String?">
+  Error message if the upload failed. Set when `status` is `.failed`
+</ResponseField>
+
+<ResponseField name="resultURL" type="URL?">
+  Public URL of the uploaded object. Set when `status` is `.completed`
+</ResponseField>
+
+<ResponseField name="uploadKey" type="String?">
+  Optional custom R2 key for the upload. When set, this is used as the full R2 key instead of generating a random-prefix key. Used for folder-aware uploads from the browser
+</ResponseField>
+
+<ResponseField name="parentFolderBookmark" type="Data?">
+  Security-scoped bookmark for a parent folder. Used when uploading folders to maintain access across app launches
+</ResponseField>
+
+<ResponseField name="fileBookmark" type="Data?">
+  Security-scoped bookmark for the file itself. Used when uploading individual files via file picker to maintain access across app launches
+</ResponseField>
+
+<ResponseField name="uploadTask" type="Task<Void, Never>?">
+  Reference to the running Swift concurrency Task. Held so it can be cancelled via the `cancel()` method
+</ResponseField>
+
+## Status Enum
+
+```swift
+enum Status: Sendable {
+    case pending      // Queued, waiting to start
+    case uploading    // Currently uploading
+    case completed    // Successfully uploaded
+    case failed       // Upload failed (see errorMessage)
+    case cancelled    // Upload was cancelled by user
+}
+```
+
+## Methods
+
+### cancel()
+
+Cancels the upload task if it's currently running.
+
+**Behavior:**
+- Cancels the Swift concurrency Task
+- Clears the `uploadTask` reference
+- Sets `status` to `.cancelled`
+
+```swift
+task.cancel()
+```
+
+## Source Code
+
+```swift UploadTask.swift
+import Foundation
+
+/// Represents a pending or in-progress upload in the upload queue
+@Observable
+final class FileUploadTask: Identifiable {
+    let id: UUID
+    let fileName: String
+    let fileSize: Int64
+    let fileURL: URL
+
+    var progress: Double = 0  // 0.0 – 1.0
+    var status: Status = .pending
+    var errorMessage: String?
+    var resultURL: URL?
+    /// When set, used as the full R2 key instead of generating a random-prefix key.
+    /// Used for folder-aware uploads from the browser.
+    var uploadKey: String?
+    /// Security-scoped bookmark for a parent folder (used when uploading folders).
+    var parentFolderBookmark: Data?
+    /// Security-scoped bookmark for the file itself (used when uploading individual files via file picker).
+    var fileBookmark: Data?
+
+    enum Status: Sendable {
+        case pending
+        case uploading
+        case completed
+        case failed
+        case cancelled
+    }
+
+    /// The running upload task — held so it can be cancelled.
+    var uploadTask: Task<Void, Never>?
+
+    init(fileURL: URL, fileName: String, fileSize: Int64) {
+        self.id = UUID()
+        self.fileURL = fileURL
+        self.fileName = fileName
+        self.fileSize = fileSize
+    }
+
+    func cancel() {
+        uploadTask?.cancel()
+        uploadTask = nil
+        status = .cancelled
+    }
+}
+```
+
+## Protocols
+
+- `@Observable` - SwiftUI observation macro for automatic UI updates
+- `Identifiable` - Has a unique `id` property for use in SwiftUI lists
+
+## Usage Example
+
+```swift
+// Create an upload task
+let task = FileUploadTask(
+    fileURL: URL(fileURLWithPath: "/path/to/file.pdf"),
+    fileName: "document.pdf",
+    fileSize: 1_048_576
+)
+
+// Monitor progress in SwiftUI
+Text("Progress: \(Int(task.progress * 100))%")
+
+// Update progress during upload
+task.progress = 0.5
+task.status = .uploading
+
+// Complete the upload
+task.status = .completed
+task.resultURL = URL(string: "https://cdn.example.com/document.pdf")
+
+// Or cancel it
+task.cancel()
+```
+
+## Security-Scoped Bookmarks
+
+The `parentFolderBookmark` and `fileBookmark` properties store security-scoped bookmark data for macOS sandbox compliance:
+
+- **parentFolderBookmark**: Used when uploading entire folders, maintains access to the parent directory
+- **fileBookmark**: Used when uploading individual files via file picker, maintains access to the specific file
+
+These bookmarks allow the app to access user-selected files across app launches without requiring the user to grant permission again.
+
+## Notes
+
+- This is a reference type (`class`) rather than a value type (`struct`) because it needs to be mutated during upload
+- The `@Observable` macro enables automatic SwiftUI view updates when properties change
+- The `uploadTask` property stores a reference to the Swift concurrency Task to enable cancellation
+- Custom upload keys (`uploadKey`) are used for maintaining folder structure in browser-based uploads

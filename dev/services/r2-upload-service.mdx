@@ -1,0 +1,237 @@
+---
+title: "R2UploadService"
+description: "File upload service for Cloudflare R2 using S3-compatible API"
+---
+
+## Overview
+
+`R2UploadService` handles file uploads to Cloudflare R2 storage using the S3-compatible API with AWS Signature V4 authentication. The service provides progress tracking and connection testing capabilities.
+
+<Info>
+  Located at: `Fiaxe/Services/R2UploadService.swift:5`
+</Info>
+
+## Type Definition
+
+```swift
+nonisolated enum R2UploadService
+```
+
+Implemented as a nonisolated enum to allow calling from any actor context without isolation restrictions.
+
+## Methods
+
+### upload()
+
+Uploads a file to R2 via a signed PUT request with progress tracking.
+
+```swift
+static func upload(
+    fileURL: URL,
+    credentials: R2Credentials,
+    key: String,
+    contentType: String,
+    onProgress: @MainActor @escaping @Sendable (Int64, Int64) -> Void
+) async throws -> UploadResult
+```
+
+<ParamField path="fileURL" type="URL" required>
+  Security-scoped URL of the file to upload. Must be accessible with proper permissions.
+</ParamField>
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials containing:
+  - Account ID
+  - Bucket name
+  - Access key ID
+  - Secret access key
+  - Endpoint URL
+</ParamField>
+
+<ParamField path="key" type="String" required>
+  Object key in the bucket (e.g., `"abc12345-photo.jpg"`). This becomes the file's path in R2.
+</ParamField>
+
+<ParamField path="contentType" type="String" required>
+  MIME type of the file (e.g., `"image/jpeg"`, `"application/pdf"`). Used to set the Content-Type header.
+</ParamField>
+
+<ParamField path="onProgress" type="@MainActor @escaping @Sendable (Int64, Int64) -> Void" required>
+  Progress callback fired on the main actor with `(bytesSent, totalBytes)`. Called periodically during upload to report progress.
+</ParamField>
+
+**Returns:** `UploadResult` containing the HTTP status code and response body.
+
+**Throws:** URLError or network-related errors if the upload fails.
+
+#### Implementation Details
+
+The upload process:
+
+1. Constructs the full R2 endpoint URL: `{endpoint}/{bucketName}/{key}`
+2. Creates a PUT request with Content-Type and Content-Length headers
+3. Signs the request using AWS Signature V4 with `UNSIGNED-PAYLOAD` (for streaming uploads)
+4. Uses a custom `URLSessionTaskDelegate` to track upload progress
+5. Returns status code and response body upon completion
+
+```swift
+// Example from R2UploadService.swift:19-50
+let url = await credentials.endpoint
+    .appendingPathComponent(credentials.bucketName)
+    .appendingPathComponent(key)
+
+var request = URLRequest(url: url)
+request.httpMethod = "PUT"
+request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+
+let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+request.setValue("\(fileSize)", forHTTPHeaderField: "Content-Length")
+
+let signedRequest = AWSV4Signer.sign(
+    request: request,
+    credentials: credentials,
+    payloadHash: "UNSIGNED-PAYLOAD"
+)
+
+let delegate = UploadProgressDelegate(onProgress: onProgress)
+let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+defer { session.finishTasksAndInvalidate() }
+
+let (data, response) = try await session.upload(for: signedRequest, fromFile: fileURL)
+let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+return UploadResult(httpStatusCode: statusCode, responseBody: data)
+```
+
+### testConnection()
+
+Performs a HEAD request to verify connectivity and credentials.
+
+```swift
+static func testConnection(credentials: R2Credentials) async throws -> Bool
+```
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials to test. The method verifies access to the specified bucket.
+</ParamField>
+
+**Returns:** `true` if the connection succeeds (HTTP 200), `false` otherwise.
+
+**Throws:** Network errors if the request fails.
+
+#### Implementation Details
+
+```swift
+// Example from R2UploadService.swift:53-68
+let url = await credentials.endpoint.appendingPathComponent(credentials.bucketName)
+var request = URLRequest(url: url)
+request.httpMethod = "HEAD"
+
+let emptyHash = SHA256.hash(data: Data()).map { String(format: "%02x", $0) }.joined()
+let signedRequest = AWSV4Signer.sign(
+    request: request,
+    credentials: credentials,
+    payloadHash: emptyHash
+)
+
+let (_, response) = try await URLSession.shared.data(for: signedRequest)
+let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+return statusCode == 200
+```
+
+The method sends a HEAD request to the bucket root to verify:
+- Credentials are valid
+- Bucket is accessible
+- Network connectivity is working
+
+## Data Types
+
+### UploadResult
+
+Result structure returned from successful uploads.
+
+```swift
+struct UploadResult: Sendable {
+    let httpStatusCode: Int
+    let responseBody: Data
+}
+```
+
+<ParamField path="httpStatusCode" type="Int">
+  HTTP status code from the R2 response. Typically `200` for successful uploads.
+</ParamField>
+
+<ParamField path="responseBody" type="Data">
+  Raw response body data from the server. Usually contains XML response with upload details.
+</ParamField>
+
+## Progress Tracking
+
+The service uses a private `UploadProgressDelegate` class that implements `URLSessionTaskDelegate` to track upload progress:
+
+```swift
+private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let onProgress: @MainActor @Sendable (Int64, Int64) -> Void
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        let handler = onProgress
+        let sent = totalBytesSent
+        let total = totalBytesExpectedToSend
+        Task { @MainActor in
+            handler(sent, total)
+        }
+    }
+}
+```
+
+Progress updates are automatically dispatched to the main actor for UI updates.
+
+## Usage Example
+
+```swift
+// Upload a file with progress tracking
+let credentials = R2Credentials(
+    accountId: "your-account-id",
+    accessKeyId: "your-access-key",
+    secretAccessKey: "your-secret-key",
+    bucketName: "my-bucket"
+)
+
+let fileURL = URL(fileURLWithPath: "/path/to/photo.jpg")
+let objectKey = "uploads/\(UUID().uuidString)-photo.jpg"
+
+do {
+    let result = try await R2UploadService.upload(
+        fileURL: fileURL,
+        credentials: credentials,
+        key: objectKey,
+        contentType: "image/jpeg",
+        onProgress: { bytesSent, totalBytes in
+            let progress = Double(bytesSent) / Double(totalBytes)
+            print("Upload progress: \(Int(progress * 100))%")
+        }
+    )
+    
+    if result.httpStatusCode == 200 {
+        print("Upload successful!")
+    }
+} catch {
+    print("Upload failed: \(error)")
+}
+
+// Test connection before uploading
+let isConnected = try await R2UploadService.testConnection(credentials: credentials)
+if isConnected {
+    print("Connection successful!")
+}
+```
+
+## Related Services
+
+- [AWSV4Signer](/dev/services/aws-v4-signer) - Handles AWS Signature V4 request signing
+- [R2BrowseService](/dev/services/r2-browse-service) - Browse and manage R2 objects

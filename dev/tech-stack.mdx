@@ -1,0 +1,658 @@
+---
+title: Technology Stack
+description: Complete overview of frameworks, APIs, and dependencies used in r2Vault
+---
+
+## Language & Platform
+
+<CardGroup cols={2}>
+  <Card title="Swift 6" icon="swift">
+    Modern Swift with strict concurrency checking
+  </Card>
+  <Card title="macOS 14.0+" icon="apple">
+    Leverages latest macOS APIs and SwiftUI features
+  </Card>
+  <Card title="Xcode 16+" icon="hammer">
+    Built with the latest Xcode toolchain
+  </Card>
+  <Card title="~4,700 LOC" icon="code">
+    Pure Swift codebase, no Objective-C
+  </Card>
+</CardGroup>
+
+## UI Frameworks
+
+### SwiftUI (Primary)
+
+r2Vault's entire interface is built with SwiftUI:
+
+```swift ContentView.swift
+struct ContentView: View {
+    @Environment(AppViewModel.self) private var viewModel
+    
+    var body: some View {
+        NavigationSplitView {
+            // Sidebar with bucket list
+            List(selection: $selection) {
+                Section("Buckets") {
+                    ForEach(viewModel.credentialsList) { creds in
+                        Label(creds.bucketName, systemImage: "externaldrive.fill")
+                    }
+                }
+            }
+        } detail: {
+            // Main browser view
+            BrowserView()
+        }
+    }
+}
+```
+
+<Tip>
+**Why SwiftUI?**
+- Declarative UI with automatic updates
+- Native macOS look and feel
+- Excellent performance with `@Observable`
+- Built-in drag-and-drop, context menus, and more
+</Tip>
+
+#### Key SwiftUI Features Used
+
+<AccordionGroup>
+  <Accordion title="@Observable Macro">
+    Swift 6's new observation system replaces `ObservableObject`:
+    
+    ```swift
+    @Observable
+    final class AppViewModel {
+        var uploadTasks: [FileUploadTask] = []
+        var currentPrefix: String = ""
+    }
+    ```
+    
+    - No manual `@Published` wrappers
+    - Better performance (fine-grained tracking)
+    - Cleaner code
+  </Accordion>
+  
+  <Accordion title="Environment Injection">
+    View model is injected at the root and accessed throughout the hierarchy:
+    
+    ```swift
+    WindowGroup {
+        ContentView()
+            .environment(viewModel)  // Inject
+    }
+    
+    // In any child view:
+    @Environment(AppViewModel.self) private var viewModel
+    ```
+  </Accordion>
+  
+  <Accordion title="NavigationSplitView">
+    Three-column navigation for macOS:
+    
+    ```swift
+    NavigationSplitView {
+        // Sidebar
+    } detail: {
+        // Main content
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Drag and Drop">
+    Native drag-and-drop with `onDrop` modifier:
+    
+    ```swift
+    .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+        handleDrop(providers)
+        return true
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Context Menus">
+    Right-click menus on objects:
+    
+    ```swift
+    .contextMenu {
+        Button("Download", systemImage: "arrow.down") { /* ... */ }
+        Button("Delete", systemImage: "trash", role: .destructive) { /* ... */ }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### AppKit (Menu Bar)
+
+While SwiftUI handles the main interface, AppKit is used for menu bar functionality:
+
+```swift Services/MenuBarManager.swift
+import AppKit
+
+@MainActor
+final class MenuBarManager: NSObject {
+    private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(
+            withLength: NSStatusItem.squareLength
+        )
+        if let button = statusItem.button {
+            button.image = NSImage(
+                systemSymbolName: "arrow.up.to.line.compact",
+                accessibilityDescription: "R2 Vault"
+            )
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+    }
+    
+    private func setupPopover() {
+        popover = NSPopover()
+        popover.contentSize = NSSize(width: 300, height: 400)
+        popover.behavior = .applicationDefined  // Never auto-dismiss
+        
+        let hostingController = NSHostingController(
+            rootView: MenuBarView().environment(viewModel)
+        )
+        popover.contentViewController = hostingController
+    }
+}
+```
+
+<Info>
+**AppKit APIs used:**
+- `NSStatusBar` / `NSStatusItem` - Menu bar icon
+- `NSPopover` - Floating panel
+- `NSHostingController` - Bridge to SwiftUI
+- `NSOpenPanel` - File picker
+- `NSPasteboard` - Clipboard operations
+- `NSCache` - Memory caching
+</Info>
+
+## Networking
+
+### URLSession
+
+All HTTP requests use Foundation's `URLSession` with async/await:
+
+```swift Services/R2UploadService.swift
+static func upload(
+    fileURL: URL,
+    credentials: R2Credentials,
+    key: String,
+    contentType: String,
+    onProgress: @MainActor @escaping @Sendable (Int64, Int64) -> Void
+) async throws -> UploadResult {
+    var request = URLRequest(url: objectURL)
+    request.httpMethod = "PUT"
+    request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+    
+    let signedRequest = AWSV4Signer.sign(
+        request: request, 
+        credentials: credentials
+    )
+    
+    let delegate = UploadProgressDelegate(onProgress: onProgress)
+    let session = URLSession(
+        configuration: .default, 
+        delegate: delegate, 
+        delegateQueue: nil
+    )
+    
+    let (data, response) = try await session.upload(
+        for: signedRequest, 
+        fromFile: fileURL
+    )
+    
+    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+    return UploadResult(httpStatusCode: statusCode, responseBody: data)
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="async/await" icon="clock">
+    Modern concurrency instead of callbacks
+  </Card>
+  <Card title="Progress Tracking" icon="chart-line">
+    `URLSessionTaskDelegate` for upload progress
+  </Card>
+  <Card title="File Uploads" icon="file-arrow-up">
+    `upload(for:fromFile:)` for efficient streaming
+  </Card>
+  <Card title="Custom Delegates" icon="user">
+    Per-session delegates for progress callbacks
+  </Card>
+</CardGroup>
+
+### S3-Compatible API
+
+Cloudflare R2 implements the AWS S3 API:
+
+<AccordionGroup>
+  <Accordion title="PUT Object">
+    Upload a file:
+    ```
+    PUT /{bucket}/{key}
+    Content-Type: image/jpeg
+    Content-Length: 123456
+    Authorization: AWS4-HMAC-SHA256 Credential=...
+    ```
+  </Accordion>
+  
+  <Accordion title="ListObjectsV2">
+    List files and folders:
+    ```
+    GET /{bucket}?list-type=2&prefix=photos/&delimiter=/
+    Authorization: AWS4-HMAC-SHA256 Credential=...
+    ```
+    
+    Returns XML with `<Contents>` (files) and `<CommonPrefixes>` (folders).
+  </Accordion>
+  
+  <Accordion title="DELETE Object">
+    Delete a file:
+    ```
+    DELETE /{bucket}/{key}
+    Authorization: AWS4-HMAC-SHA256 Credential=...
+    ```
+  </Accordion>
+  
+  <Accordion title="HEAD Bucket">
+    Test connection:
+    ```
+    HEAD /{bucket}
+    Authorization: AWS4-HMAC-SHA256 Credential=...
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Cryptography
+
+### CryptoKit
+
+Apple's native cryptography framework handles AWS Signature V4:
+
+```swift Services/AWSV4Signer.swift
+import CryptoKit
+
+nonisolated enum AWSV4Signer {
+    static func sha256Hex(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
+    private static func deriveSigningKey(
+        secret: String, 
+        date: String, 
+        region: String, 
+        service: String
+    ) -> SymmetricKey {
+        let kSecret = SymmetricKey(data: Data(("AWS4" + secret).utf8))
+        let kDate = hmac(key: kSecret, data: Data(date.utf8))
+        let kRegion = hmac(key: kDate, data: Data(region.utf8))
+        let kService = hmac(key: kRegion, data: Data(service.utf8))
+        return hmac(key: kService, data: Data("aws4_request".utf8))
+    }
+    
+    private static func hmac(key: SymmetricKey, data: Data) -> SymmetricKey {
+        SymmetricKey(data: Data(
+            HMAC<SHA256>.authenticationCode(for: data, using: key)
+        ))
+    }
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="SHA-256" icon="hashtag">
+    For payload hashing and canonical request digests
+  </Card>
+  <Card title="HMAC-SHA256" icon="key">
+    For signature derivation (AWS Signature V4)
+  </Card>
+  <Card title="SymmetricKey" icon="lock">
+    Type-safe key handling
+  </Card>
+  <Card title="Zero Dependencies" icon="check">
+    No third-party crypto libraries
+  </Card>
+</CardGroup>
+
+## Data Persistence
+
+### UserDefaults
+
+Simple key-value storage for credentials and history:
+
+```swift Services/KeychainService.swift
+enum KeychainService {
+    private static let storageKey = "fiaxe.r2credentials"
+    
+    static func saveAll(_ credentials: [R2Credentials]) throws {
+        let data = try JSONEncoder().encode(credentials)
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+    
+    static func loadAll() throws -> [R2Credentials] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) 
+        else { return [] }
+        return try JSONDecoder().decode([R2Credentials].self, from: data)
+    }
+}
+```
+
+```swift Services/UploadHistoryStore.swift
+@Observable
+final class UploadHistoryStore {
+    private static let storageKey = "fiaxe.uploadHistory"
+    var items: [UploadItem] = []
+    
+    private func save() {
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
+    }
+    
+    private func load() {
+        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
+              let decoded = try? JSONDecoder().decode([UploadItem].self, from: data)
+        else { return }
+        items = decoded
+    }
+}
+```
+
+<Warning>
+**Security consideration**: Credentials are stored in plain text in UserDefaults. For a personal tool this is acceptable, but production apps should use the macOS Keychain.
+</Warning>
+
+### File System (Disk Cache)
+
+Thumbnails are cached to disk in the user's cache directory:
+
+```swift Services/ThumbnailCache.swift
+actor ThumbnailCache {
+    private let diskCacheURL: URL = {
+        let caches = FileManager.default.urls(
+            for: .cachesDirectory, 
+            in: .userDomainMask
+        ).first!
+        let dir = caches.appendingPathComponent(
+            "R2VaultThumbnails", 
+            isDirectory: true
+        )
+        try? FileManager.default.createDirectory(
+            at: dir, 
+            withIntermediateDirectories: true
+        )
+        return dir
+    }()
+    
+    private func saveToDisk(_ image: NSImage, key: String) {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:])
+        else { return }
+        try? png.write(to: diskURL(for: key))
+    }
+}
+```
+
+## Concurrency
+
+### Structured Concurrency
+
+All async work uses Swift 6's structured concurrency:
+
+<AccordionGroup>
+  <Accordion title="async/await">
+    Every I/O operation is async:
+    ```swift
+    func loadCurrentFolder() {
+        Task {
+            do {
+                let result = try await R2BrowseService.listObjects(
+                    credentials: credentials,
+                    prefix: currentPrefix
+                )
+                browserObjects = result.objects
+            } catch {
+                browserError = error.localizedDescription
+            }
+        }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="TaskGroup (Parallel Execution)">
+    Multiple uploads/deletes run concurrently:
+    ```swift
+    await withTaskGroup(of: Void.self) { group in
+        for uploadTask in pending {
+            group.addTask {
+                await self.uploadSingleFile(uploadTask, credentials: credentials)
+            }
+        }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Task Cancellation">
+    Uploads can be cancelled:
+    ```swift
+    @Observable
+    final class FileUploadTask {
+        var uploadTask: Task<Void, Never>?
+        
+        func cancel() {
+            uploadTask?.cancel()
+            status = .cancelled
+        }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="@MainActor">
+    All UI updates run on the main thread:
+    ```swift
+    @Observable  // Implicitly @MainActor
+    final class AppViewModel {
+        var uploadTasks: [FileUploadTask] = []
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Actor Isolation">
+    Thread-safe caching:
+    ```swift
+    actor ThumbnailCache {
+        private var inFlight: [String: Task<NSImage?, Never>] = [:]
+        
+        func thumbnail(for key: String) async -> NSImage? {
+            // Safe concurrent access
+        }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Sendable Types
+
+All types crossing actor boundaries are `Sendable`:
+
+```swift
+struct R2Credentials: Sendable, Codable { /* ... */ }
+struct R2Object: Sendable { /* ... */ }
+struct UploadItem: Sendable { /* ... */ }
+
+enum R2UploadService { /* nonisolated */ }
+enum AWSV4Signer { /* nonisolated */ }
+```
+
+<Tip>
+`nonisolated enum` services can be called from any actor without await.
+</Tip>
+
+## Media Handling
+
+### UniformTypeIdentifiers
+
+Determines MIME types for uploads:
+
+```swift ViewModels/AppViewModel.swift
+import UniformTypeIdentifiers
+
+private func mimeType(for url: URL) -> String {
+    if let type = UTType(filenameExtension: url.pathExtension) {
+        return type.preferredMIMEType ?? "application/octet-stream"
+    }
+    return "application/octet-stream"
+}
+```
+
+### AVFoundation
+
+Generates video thumbnails:
+
+```swift Services/ThumbnailCache.swift
+import AVFoundation
+
+private func videoThumbnail(url: URL) async -> NSImage? {
+    let asset = AVURLAsset(url: url)
+    let gen = AVAssetImageGenerator(asset: asset)
+    gen.appliesPreferredTrackTransform = true
+    gen.maximumSize = CGSize(width: 120, height: 120)
+    guard let cgImage = try? await gen.image(at: .zero).image 
+    else { return nil }
+    return NSImage(cgImage: cgImage, size: NSSize(width: 120, height: 120))
+}
+```
+
+### QuickLook
+
+Prevews files directly from R2:
+
+```swift Services/QuickLookCoordinator.swift
+import Quartz
+
+final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource {
+    var previewURL: URL?
+    
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        previewURL != nil ? 1 : 0
+    }
+    
+    func previewPanel(
+        _ panel: QLPreviewPanel!, 
+        previewItemAt index: Int
+    ) -> QLPreviewItem! {
+        previewURL as QLPreviewItem?
+    }
+}
+```
+
+## XML Parsing
+
+### XMLParser (Foundation)
+
+Custom delegate-based parser for S3 XML responses:
+
+```swift Services/R2BrowseService.swift
+private final class ListBucketResultParser: NSObject, XMLParserDelegate {
+    private var objects: [R2Object] = []
+    private var folders: [R2Object] = []
+    private var currentElement = ""
+    private var currentText = ""
+    
+    func parser(
+        _ parser: XMLParser, 
+        didStartElement elementName: String, 
+        namespaceURI: String?, 
+        qualifiedName qName: String?, 
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        currentElement = elementName
+        currentText = ""
+        if elementName == "Contents" { inContents = true }
+    }
+    
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentText += string
+    }
+    
+    func parser(
+        _ parser: XMLParser, 
+        didEndElement elementName: String, 
+        namespaceURI: String?, 
+        qualifiedName qName: String?
+    ) {
+        switch elementName {
+        case "Key": currentKey = currentText
+        case "Size": currentSize = Int64(currentText) ?? 0
+        case "LastModified": currentLastModified = iso8601.date(from: currentText)
+        default: break
+        }
+    }
+}
+```
+
+<Info>
+S3's ListObjectsV2 returns XML, not JSON. A custom parser extracts files (`<Contents>`) and folders (`<CommonPrefixes>`).
+</Info>
+
+## Developer Tools
+
+<CardGroup cols={2}>
+  <Card title="Git" icon="git">
+    Version control with GitHub
+  </Card>
+  <Card title="Xcode" icon="hammer">
+    IDE with Swift 6 support
+  </Card>
+  <Card title="GitHub Actions" icon="robot">
+    CI/CD for automated releases
+  </Card>
+  <Card title="sparkle-project" icon="sparkles">
+    Auto-update framework (future)
+  </Card>
+</CardGroup>
+
+## Notable Absences
+
+<Note>
+**Zero third-party dependencies**
+
+r2Vault is built entirely with native Apple frameworks:
+- No CocoaPods
+- No Swift Package Manager dependencies
+- No external SDKs
+
+This keeps the codebase simple, secure, and maintainable.
+</Note>
+
+## Summary
+
+| Category | Technologies |
+|----------|-------------|
+| **Language** | Swift 6 |
+| **UI** | SwiftUI, AppKit (menu bar) |
+| **Networking** | URLSession, S3 API |
+| **Crypto** | CryptoKit (SHA-256, HMAC-SHA256) |
+| **Persistence** | UserDefaults, FileManager |
+| **Concurrency** | async/await, TaskGroup, Actor |
+| **Media** | AVFoundation, UniformTypeIdentifiers, QuickLook |
+| **Parsing** | XMLParser (Foundation) |
+| **Platform** | macOS 14.0+ |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/dev/architecture">
+    Understand the MVVM pattern and concurrency model
+  </Card>
+  <Card title="Project Structure" icon="folder-tree" href="/dev/project-structure">
+    Explore the directory layout and file organization
+  </Card>
+</CardGroup>

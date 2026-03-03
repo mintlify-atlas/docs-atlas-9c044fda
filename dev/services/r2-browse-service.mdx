@@ -1,0 +1,385 @@
+---
+title: "R2BrowseService"
+description: "Browse, create, and delete objects in Cloudflare R2 using S3-compatible API"
+---
+
+## Overview
+
+`R2BrowseService` provides S3-compatible ListObjectsV2, folder creation, and delete operations for Cloudflare R2. The service handles pagination, virtual folder management, and recursive object enumeration.
+
+<Info>
+  Located at: `Fiaxe/Services/R2BrowseService.swift:12`
+</Info>
+
+## Type Definition
+
+```swift
+nonisolated enum R2BrowseService
+```
+
+Implemented as a nonisolated enum to allow calling from any actor context.
+
+## Methods
+
+### listObjects()
+
+Lists objects and virtual folders at a given prefix (one level deep with delimiter).
+
+```swift
+static func listObjects(
+    credentials: R2Credentials,
+    prefix: String = ""
+) async throws -> ListResult
+```
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials for authentication.
+</ParamField>
+
+<ParamField path="prefix" type="String" default="">
+  Prefix to filter objects by. Use empty string for root level, or `"folder/"` for a specific folder.
+</ParamField>
+
+**Returns:** `ListResult` containing objects, folders, and pagination info.
+
+**Throws:** `R2BrowseError` or URLError if the request fails.
+
+#### Implementation Details
+
+The method automatically handles pagination by fetching all pages:
+
+```swift
+// Example from R2BrowseService.swift:17-39
+var allObjects: [R2Object] = []
+var allFolders: [R2Object] = []
+var continuationToken: String? = nil
+
+repeat {
+    let page = try await listPage(
+        credentials: credentials,
+        prefix: prefix,
+        continuationToken: continuationToken
+    )
+    allObjects.append(contentsOf: page.objects)
+    allFolders.append(contentsOf: page.folders)
+    continuationToken = page.isTruncated ? page.nextContinuationToken : nil
+} while continuationToken != nil
+
+return ListResult(
+    objects: allObjects,
+    folders: allFolders,
+    isTruncated: false,
+    nextContinuationToken: nil
+)
+```
+
+Each page uses the S3 ListObjectsV2 API with:
+- `list-type=2` parameter
+- `delimiter=/` to create virtual folders
+- `prefix` to scope the listing
+- `continuation-token` for pagination
+
+### listAllKeys()
+
+Lists every object key that starts with a prefix (fully recursive, no delimiter).
+
+```swift
+static func listAllKeys(
+    credentials: R2Credentials,
+    prefix: String
+) async throws -> [String]
+```
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials for authentication.
+</ParamField>
+
+<ParamField path="prefix" type="String" required>
+  Prefix to filter objects by. All objects starting with this prefix will be returned, including nested objects.
+</ParamField>
+
+**Returns:** Array of all object keys matching the prefix.
+
+**Throws:** `R2BrowseError` or URLError if the request fails.
+
+#### Implementation Details
+
+This method performs a flat listing without the delimiter parameter, allowing recursive enumeration:
+
+```swift
+// Example from R2BrowseService.swift:115-155
+var allKeys: [String] = []
+var continuationToken: String? = nil
+
+repeat {
+    let baseURL = credentials.endpoint
+        .appendingPathComponent(credentials.bucketName)
+
+    var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+    var queryItems: [URLQueryItem] = [
+        URLQueryItem(name: "list-type", value: "2"),
+        URLQueryItem(name: "prefix", value: prefix),
+    ]
+    if let token = continuationToken {
+        queryItems.append(URLQueryItem(name: "continuation-token", value: token))
+    }
+    comps.queryItems = queryItems
+
+    // ... sign and execute request ...
+
+    let parser = FlatListParser()
+    let result = try parser.parse(data: data)
+    allKeys.append(contentsOf: result.keys)
+    continuationToken = result.isTruncated ? result.nextContinuationToken : nil
+} while continuationToken != nil
+
+return allKeys
+```
+
+Useful for operations that need to enumerate all nested objects (e.g., deleting a folder recursively).
+
+### createFolder()
+
+Creates a virtual folder by putting a zero-byte object with a trailing slash.
+
+```swift
+static func createFolder(
+    credentials: R2Credentials,
+    folderKey: String
+) async throws
+```
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials for authentication.
+</ParamField>
+
+<ParamField path="folderKey" type="String" required>
+  Folder key to create. Trailing slash is added automatically if not present. Example: `"documents"` or `"documents/"`.
+</ParamField>
+
+**Throws:** `R2BrowseError` if the creation fails.
+
+#### Implementation Details
+
+```swift
+// Example from R2BrowseService.swift:89-110
+let key = folderKey.hasSuffix("/") ? folderKey : folderKey + "/"
+guard let url = objectURL(credentials: credentials, key: key) else {
+    throw URLError(.badURL)
+}
+
+var request = URLRequest(url: url)
+request.httpMethod = "PUT"
+request.setValue("0", forHTTPHeaderField: "Content-Length")
+request.setValue("application/x-directory", forHTTPHeaderField: "Content-Type")
+
+let emptyHash = AWSV4Signer.sha256Hex("")
+let signed = AWSV4Signer.sign(request: request, credentials: credentials, payloadHash: emptyHash)
+
+let (data, response) = try await URLSession.shared.data(for: signed)
+guard let httpResponse = response as? HTTPURLResponse,
+      (200...299).contains(httpResponse.statusCode) else {
+    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+    throw R2BrowseError.httpError(statusCode, body)
+}
+```
+
+Folders in S3/R2 are virtual - they're represented by zero-byte objects with a trailing slash and `application/x-directory` content type.
+
+### deleteObject()
+
+Deletes an object by key.
+
+```swift
+static func deleteObject(
+    credentials: R2Credentials,
+    key: String
+) async throws
+```
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials for authentication.
+</ParamField>
+
+<ParamField path="key" type="String" required>
+  Object key to delete. Can be a file or folder (with trailing slash).
+</ParamField>
+
+**Throws:** `R2BrowseError` if the deletion fails.
+
+#### Implementation Details
+
+```swift
+// Example from R2BrowseService.swift:175-193
+guard let url = objectURL(credentials: credentials, key: key) else {
+    throw URLError(.badURL)
+}
+
+var request = URLRequest(url: url)
+request.httpMethod = "DELETE"
+
+let emptyHash = AWSV4Signer.sha256Hex("")
+let signed = AWSV4Signer.sign(request: request, credentials: credentials, payloadHash: emptyHash)
+
+let (data, response) = try await URLSession.shared.data(for: signed)
+guard let httpResponse = response as? HTTPURLResponse,
+      (200...299).contains(httpResponse.statusCode) || httpResponse.statusCode == 204 else {
+    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+    throw R2BrowseError.httpError(statusCode, body)
+}
+```
+
+Accepts both 2xx and 204 (No Content) as success codes.
+
+## Data Types
+
+### ListResult
+
+Result from a ListObjectsV2 call.
+
+```swift
+struct ListResult: Sendable {
+    var objects: [R2Object]        // files (Contents)
+    var folders: [R2Object]        // virtual folders (CommonPrefixes)
+    var isTruncated: Bool
+    var nextContinuationToken: String?
+}
+```
+
+<ParamField path="objects" type="[R2Object]">
+  Array of file objects returned from the `<Contents>` elements in the XML response.
+</ParamField>
+
+<ParamField path="folders" type="[R2Object]">
+  Array of virtual folder objects from the `<CommonPrefixes>` elements. Only present when using a delimiter.
+</ParamField>
+
+<ParamField path="isTruncated" type="Bool">
+  Whether there are more results available. Always `false` after `listObjects()` completes all pagination.
+</ParamField>
+
+<ParamField path="nextContinuationToken" type="String?">
+  Token for fetching the next page. `nil` when all results have been retrieved.
+</ParamField>
+
+### R2BrowseError
+
+Errors thrown by the browse service.
+
+```swift
+enum R2BrowseError: LocalizedError {
+    case httpError(Int, String)
+    case parseError(String)
+}
+```
+
+<ParamField path="httpError" type="(Int, String)">
+  HTTP error with status code and response body. Example: `httpError(403, "Access Denied")`.
+</ParamField>
+
+<ParamField path="parseError" type="String">
+  XML parsing error with description.
+</ParamField>
+
+## URL Building
+
+The service includes a private URL builder that correctly handles percent-encoding:
+
+```swift
+// Example from R2BrowseService.swift:160-172
+private static func objectURL(credentials: R2Credentials, key: String) -> URL? {
+    // Encode each path segment individually, preserving slashes and trailing slash
+    let encodedKey = key
+        .components(separatedBy: "/")
+        .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+        .joined(separator: "/")
+    let rawPath = "/\(credentials.bucketName)/\(encodedKey)"
+    var comps = URLComponents()
+    comps.scheme = "https"
+    comps.host = "\(credentials.accountId).r2.cloudflarestorage.com"
+    comps.percentEncodedPath = rawPath
+    return comps.url
+}
+```
+
+This preserves trailing slashes and correctly encodes special characters in object keys.
+
+## XML Parsing
+
+The service includes two custom XML parsers:
+
+### ListBucketResultParser
+
+Parses the S3 ListObjectsV2 XML response with delimiter:
+
+- Extracts `<Contents>` elements as file objects
+- Extracts `<CommonPrefixes>` elements as folder objects
+- Handles `<IsTruncated>` and `<NextContinuationToken>` for pagination
+- Parses ISO8601 dates with fractional seconds
+
+### FlatListParser
+
+Parses the S3 ListObjectsV2 XML response without delimiter:
+
+- Extracts only object keys from `<Contents>` elements
+- Used by `listAllKeys()` for recursive enumeration
+- Handles pagination tokens
+
+## Usage Examples
+
+```swift
+let credentials = R2Credentials(
+    accountId: "your-account-id",
+    accessKeyId: "your-access-key",
+    secretAccessKey: "your-secret-key",
+    bucketName: "my-bucket"
+)
+
+// List root level objects and folders
+let rootList = try await R2BrowseService.listObjects(
+    credentials: credentials,
+    prefix: ""
+)
+print("Files: \(rootList.objects.count)")
+print("Folders: \(rootList.folders.count)")
+
+// List objects in a specific folder
+let folderList = try await R2BrowseService.listObjects(
+    credentials: credentials,
+    prefix: "documents/"
+)
+
+// Create a new folder
+try await R2BrowseService.createFolder(
+    credentials: credentials,
+    folderKey: "photos"
+)
+
+// Delete a file
+try await R2BrowseService.deleteObject(
+    credentials: credentials,
+    key: "old-file.txt"
+)
+
+// Recursively list all keys in a folder
+let allKeys = try await R2BrowseService.listAllKeys(
+    credentials: credentials,
+    prefix: "documents/"
+)
+print("Total objects: \(allKeys.count)")
+
+// Delete all objects in a folder
+for key in allKeys {
+    try await R2BrowseService.deleteObject(
+        credentials: credentials,
+        key: key
+    )
+}
+```
+
+## Related Services
+
+- [AWSV4Signer](/dev/services/aws-v4-signer) - Handles AWS Signature V4 request signing
+- [R2UploadService](/dev/services/r2-upload-service) - Upload files to R2
