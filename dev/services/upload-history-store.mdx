@@ -1,0 +1,380 @@
+---
+title: "UploadHistoryStore"
+description: "Persistent storage for upload history using UserDefaults"
+---
+
+## Overview
+
+`UploadHistoryStore` manages the upload history by persisting completed uploads to UserDefaults. It provides an observable list of upload items that automatically syncs to disk, allowing users to track their upload activity across app launches.
+
+<Info>
+  Located at: `Fiaxe/Services/UploadHistoryStore.swift:6`
+</Info>
+
+## Type Definition
+
+```swift
+@Observable
+final class UploadHistoryStore
+```
+
+An observable class that automatically notifies SwiftUI views when the history changes.
+
+## Properties
+
+### items
+
+The current list of upload history items.
+
+```swift
+var items: [UploadItem] = []
+```
+
+<ParamField path="items" type="[UploadItem]">
+  Array of completed uploads, sorted with newest first. Automatically persisted to UserDefaults.
+</ParamField>
+
+## Methods
+
+### add()
+
+Adds a new upload item to the history.
+
+```swift
+func add(_ item: UploadItem)
+```
+
+<ParamField path="item" type="UploadItem" required>
+  The upload item to add to history. Contains file name, size, R2 key, upload date, and public URL.
+</ParamField>
+
+#### Implementation Details
+
+```swift
+// Example from UploadHistoryStore.swift:15-18
+func add(_ item: UploadItem) {
+    items.insert(item, at: 0)  // newest first
+    save()
+}
+```
+
+The method:
+1. Inserts the new item at index 0 (beginning of array)
+2. Maintains reverse chronological order (newest first)
+3. Automatically persists to UserDefaults
+
+### remove()
+
+Removes upload items at the specified indices.
+
+```swift
+func remove(at offsets: IndexSet)
+```
+
+<ParamField path="offsets" type="IndexSet" required>
+  Indices of items to remove. Typically provided by SwiftUI's `onDelete` modifier.
+</ParamField>
+
+#### Implementation Details
+
+```swift
+// Example from UploadHistoryStore.swift:20-23
+func remove(at offsets: IndexSet) {
+    items.remove(atOffsets: offsets)
+    save()
+}
+```
+
+Used with SwiftUI's List deletion:
+```swift
+List {
+    ForEach(store.items) { item in
+        UploadHistoryRow(item: item)
+    }
+    .onDelete { offsets in
+        store.remove(at: offsets)
+    }
+}
+```
+
+### clearAll()
+
+Removes all items from the history.
+
+```swift
+func clearAll()
+```
+
+Useful for implementing a "Clear History" button.
+
+#### Implementation Details
+
+```swift
+// Example from UploadHistoryStore.swift:25-28
+func clearAll() {
+    items.removeAll()
+    save()
+}
+```
+
+## Persistence Implementation
+
+The store uses UserDefaults with JSON encoding:
+
+```swift
+private static let storageKey = "fiaxe.uploadHistory"
+
+private func save() {
+    guard let data = try? JSONEncoder().encode(items) else { return }
+    UserDefaults.standard.set(data, forKey: Self.storageKey)
+}
+
+private func load() {
+    guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
+          let decoded = try? JSONDecoder().decode([UploadItem].self, from: data)
+    else { return }
+    items = decoded
+}
+```
+
+<ParamField path="storageKey" type="String">
+  UserDefaults key: `"fiaxe.uploadHistory"`
+</ParamField>
+
+### Initialization
+
+The store automatically loads saved history on initialization:
+
+```swift
+init() {
+    load()
+}
+```
+
+History is restored when the app launches.
+
+## Data Format
+
+History is stored as JSON-encoded array of `UploadItem` objects:
+
+```json
+[
+  {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "fileName": "photo.jpg",
+    "fileSize": 2048576,
+    "r2Key": "abc12345-photo.jpg",
+    "uploadDate": "2024-03-15T12:30:45Z",
+    "publicURL": "https://pub-bucket.example.com/abc12345-photo.jpg"
+  },
+  // ... more items
+]
+```
+
+## Usage Example
+
+```swift
+import SwiftUI
+
+struct UploadHistoryView: View {
+    @State private var store = UploadHistoryStore()
+    
+    var body: some View {
+        VStack {
+            List {
+                ForEach(store.items) { item in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(item.fileName)
+                                .font(.headline)
+                            Text(item.formattedFileSize)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(item.uploadDate.formatted())
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        Button("Copy URL") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                item.publicURL.absoluteString,
+                                forType: .string
+                            )
+                        }
+                    }
+                }
+                .onDelete { offsets in
+                    store.remove(at: offsets)
+                }
+            }
+            
+            if !store.items.isEmpty {
+                Button("Clear All History") {
+                    store.clearAll()
+                }
+                .foregroundColor(.red)
+            }
+        }
+    }
+}
+```
+
+### Adding Items After Upload
+
+```swift
+// After successful upload
+let uploadItem = UploadItem(
+    fileName: fileURL.lastPathComponent,
+    fileSize: fileSize,
+    r2Key: generatedKey,
+    publicURL: publicURL
+)
+
+uploadHistoryStore.add(uploadItem)
+```
+
+## Automatic Persistence
+
+<Tip>
+**Zero-Effort Persistence**
+
+The store automatically saves to UserDefaults after every modification:
+- `add()` saves immediately
+- `remove()` saves immediately
+- `clearAll()` saves immediately
+
+No manual save calls are needed.
+</Tip>
+
+## Observable Behavior
+
+The `@Observable` macro enables automatic SwiftUI updates:
+
+```swift
+@Observable
+final class UploadHistoryStore {
+    var items: [UploadItem] = []  // Changes automatically trigger view updates
+}
+```
+
+Views automatically refresh when:
+- Items are added
+- Items are removed
+- All items are cleared
+
+## Integration with r2Vault
+
+The upload history is integrated into the menu bar popover:
+
+```swift
+struct MenuBarView: View {
+    @Environment(AppViewModel.self) private var viewModel
+    @State private var historyStore = UploadHistoryStore()
+    
+    var body: some View {
+        TabView {
+            UploadQueueView()
+                .tabItem { Label("Queue", systemImage: "arrow.up") }
+            
+            UploadHistoryView(store: historyStore)
+                .tabItem { Label("History", systemImage: "clock") }
+        }
+    }
+}
+```
+
+Users can:
+- View recent uploads
+- Copy public URLs
+- Delete individual items
+- Clear entire history
+
+## Data Retention
+
+<Note>
+**Unlimited History**
+
+The current implementation stores all uploads indefinitely. For production use, consider:
+- Limiting to the most recent N uploads
+- Auto-deleting items older than X days
+- Implementing search/filter functionality
+- Adding pagination for large histories
+</Note>
+
+## Privacy Considerations
+
+<Warning>
+**Stored in Plain Text**
+
+Upload history is stored in UserDefaults without encryption:
+- File names are visible
+- Public URLs are visible
+- Upload dates are visible
+- R2 keys are visible
+
+For sensitive uploads, consider:
+- Adding encryption for stored data
+- Providing a "Clear History on Quit" option
+- Implementing automatic cleanup
+- Storing less identifying information
+</Warning>
+
+## Error Handling
+
+The store gracefully handles encoding/decoding errors:
+
+```swift
+private func save() {
+    guard let data = try? JSONEncoder().encode(items) else { return }
+    // Silently fails if encoding fails
+    UserDefaults.standard.set(data, forKey: Self.storageKey)
+}
+
+private func load() {
+    guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
+          let decoded = try? JSONDecoder().decode([UploadItem].self, from: data)
+    else { return }  // Silently fails if decoding fails
+    items = decoded
+}
+```
+
+Failures result in:
+- Empty history on load failure
+- No persistence on save failure
+- No crashes or error messages
+
+## Testing Considerations
+
+For testing, use a separate UserDefaults suite:
+
+```swift
+// Modify the store to accept a custom UserDefaults
+final class UploadHistoryStore {
+    private let defaults: UserDefaults
+    private let storageKey: String
+    
+    init(defaults: UserDefaults = .standard, storageKey: String = "fiaxe.uploadHistory") {
+        self.defaults = defaults
+        self.storageKey = storageKey
+        load()
+    }
+    
+    private func save() {
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+}
+
+// In tests
+let testDefaults = UserDefaults(suiteName: "com.example.tests")!
+let store = UploadHistoryStore(defaults: testDefaults)
+```
+
+## Related Services
+
+- [UploadItem](/dev/models/upload-item) - Data model for upload history entries
+- [R2UploadService](/dev/services/r2-upload-service) - Performs uploads that get recorded
+- [KeychainService](/dev/services/keychain-service) - Also uses UserDefaults for persistence

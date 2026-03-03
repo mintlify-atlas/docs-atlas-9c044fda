@@ -1,0 +1,310 @@
+---
+title: "QuickLookCoordinator"
+description: "Quick Look panel integration for file previews directly from R2"
+---
+
+## Overview
+
+`QuickLookCoordinator` manages the system Quick Look panel, allowing users to preview files directly from R2 storage without downloading them first. It streams files using presigned URLs and integrates with macOS's native Quick Look functionality (spacebar preview).
+
+<Info>
+  Located at: `Fiaxe/Services/QuickLookCoordinator.swift:18`
+</Info>
+
+## Type Definition
+
+```swift
+@MainActor
+final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate
+```
+
+Main actor-isolated singleton that implements Quick Look protocols for preview functionality.
+
+### Singleton Instance
+
+```swift
+static let shared = QuickLookCoordinator()
+```
+
+Access the shared coordinator instance from the main actor.
+
+## Methods
+
+### preview()
+
+Displays the Quick Look panel for a specific R2 object.
+
+```swift
+func preview(_ object: R2Object, credentials: R2Credentials)
+```
+
+<ParamField path="object" type="R2Object" required>
+  The R2 object to preview. Must contain a valid key and name.
+</ParamField>
+
+<ParamField path="credentials" type="R2Credentials" required>
+  R2 credentials used to generate a presigned URL for secure access.
+</ParamField>
+
+#### Implementation Details
+
+```swift
+// Example from QuickLookCoordinator.swift:27-45
+func preview(_ object: R2Object, credentials: R2Credentials) {
+    let panel = QLPreviewPanel.shared()!
+
+    // Toggle: if already visible for same coordinator, close it
+    if panel.isVisible && panel.dataSource === self {
+        panel.close()
+        return
+    }
+
+    // Generate a presigned URL and pass it directly to Quick Look — no download needed.
+    // previewItemTitle supplies the filename so QL picks the right previewer plugin.
+    guard let presignedURL = AWSV4Signer.presignedURL(for: object.key, credentials: credentials) else { return }
+    previewItem = PreviewItem(url: presignedURL, title: object.name)
+
+    panel.dataSource = self
+    panel.delegate  = self
+    panel.makeKeyAndOrderFront(nil)
+    panel.reloadData()
+}
+```
+
+The method:
+1. Gets the shared Quick Look panel
+2. Toggles panel visibility if already open for the same coordinator
+3. Generates a presigned URL for streaming the file directly from R2
+4. Wraps the URL in a `PreviewItem` with the filename for proper format detection
+5. Sets itself as the data source and delegate
+6. Shows the panel and loads the preview
+
+<Tip>
+**No Download Required**
+
+Quick Look streams the file directly from the presigned URL without downloading to disk first. This provides instant previews for files of any size.
+</Tip>
+
+## Preview Item Wrapper
+
+The coordinator uses a private `PreviewItem` class to wrap URLs for Quick Look:
+
+```swift
+private final class PreviewItem: NSObject, QLPreviewItem {
+    let previewItemURL: URL?
+    let previewItemTitle: String?
+
+    init(url: URL, title: String) {
+        self.previewItemURL = url
+        self.previewItemTitle = title
+    }
+}
+```
+
+<ParamField path="previewItemURL" type="URL?">
+  The presigned URL pointing to the R2 object.
+</ParamField>
+
+<ParamField path="previewItemTitle" type="String?">
+  The original filename. Quick Look uses this to determine the correct previewer plugin based on file extension.
+</ParamField>
+
+<Note>
+**Why Wrap the URL?**
+
+URL is a struct and can't directly conform to the `QLPreviewItem` protocol which requires `NSObject`. The wrapper class provides this conformance.
+</Note>
+
+## Protocol Conformance
+
+### QLPreviewPanelDataSource
+
+Provides preview items to the Quick Look panel.
+
+#### numberOfPreviewItems()
+
+```swift
+func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+    previewItem != nil ? 1 : 0
+}
+```
+
+Returns 1 if a preview item is available, 0 otherwise.
+
+#### previewPanel(_:previewItemAt:)
+
+```swift
+func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+    previewItem
+}
+```
+
+Returns the current preview item at the specified index.
+
+### QLPreviewPanelDelegate
+
+Handles Quick Look panel events.
+
+#### previewPanel(_:handle:)
+
+```swift
+func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+    false
+}
+```
+
+Returns `false` to use default event handling. Could be customized for keyboard shortcuts or gestures.
+
+## Presigned URL Generation
+
+The coordinator relies on `AWSV4Signer` to generate time-limited presigned URLs:
+
+```swift
+guard let presignedURL = AWSV4Signer.presignedURL(
+    for: object.key,
+    credentials: credentials
+) else { return }
+```
+
+Presigned URLs:
+- Grant temporary read access to private R2 objects
+- Expire after a set duration (typically 1 hour)
+- Allow streaming without exposing credentials
+- Work with any HTTP client (including Quick Look)
+
+## Supported File Types
+
+Quick Look supports previews for many file types:
+
+<CardGroup cols={3}>
+  <Card title="Images" icon="image">
+    JPEG, PNG, GIF, HEIC, SVG, etc.
+  </Card>
+  <Card title="Videos" icon="film">
+    MP4, MOV, M4V, etc.
+  </Card>
+  <Card title="Documents" icon="file-lines">
+    PDF, Pages, Word, Excel, etc.
+  </Card>
+  <Card title="Code" icon="code">
+    Swift, Python, JavaScript, etc.
+  </Card>
+  <Card title="Archives" icon="file-zipper">
+    ZIP, TAR, etc. (shows contents)
+  </Card>
+  <Card title="Audio" icon="music">
+    MP3, M4A, FLAC, etc.
+  </Card>
+</CardGroup>
+
+## Usage Example
+
+```swift
+import SwiftUI
+
+struct FileRowView: View {
+    let object: R2Object
+    let credentials: R2Credentials
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "doc")
+            Text(object.name)
+        }
+        .onTapGesture(count: 2) {
+            // Double-click to preview
+            QuickLookCoordinator.shared.preview(object, credentials: credentials)
+        }
+        .onKeyPress(.space) {
+            // Spacebar to preview
+            QuickLookCoordinator.shared.preview(object, credentials: credentials)
+            return .handled
+        }
+    }
+}
+```
+
+## Toggle Behavior
+
+The coordinator implements smart toggle behavior:
+
+```swift
+// If panel is already visible for this coordinator, close it
+if panel.isVisible && panel.dataSource === self {
+    panel.close()
+    return
+}
+```
+
+This allows users to:
+- Press spacebar to open preview
+- Press spacebar again to close preview
+- Switch between different files seamlessly
+
+## Integration with r2Vault
+
+In the main browser view, Quick Look is triggered via:
+
+```swift
+List(browserObjects) { object in
+    FileRow(object: object)
+        .onKeyPress(.space) {
+            QuickLookCoordinator.shared.preview(object, credentials: credentials)
+            return .handled
+        }
+}
+```
+
+Users can:
+- Select a file and press spacebar
+- Double-click a file (if implemented)
+- See instant previews without downloading
+
+## Performance Characteristics
+
+<AccordionGroup>
+  <Accordion title="Streaming">
+    Files are streamed directly from R2 via presigned URLs. Quick Look handles buffering and caching automatically.
+  </Accordion>
+  
+  <Accordion title="No Disk Usage">
+    Previews don't write to disk (unless Quick Look caches internally). Large files can be previewed without filling up storage.
+  </Accordion>
+  
+  <Accordion title="Network Dependency">
+    Preview quality depends on network speed. Slow connections may show loading indicators.
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+<Warning>
+**Quick Look Limitations**
+
+- Some file types may not be supported
+- Very large files (multi-GB) may timeout or be slow to load
+- Network interruptions will break the preview
+- Presigned URLs expire after their validity period
+- Private R2 buckets require valid credentials
+</Warning>
+
+## Security Considerations
+
+<Note>
+**Presigned URL Security**
+
+Presigned URLs are temporary and scoped to a single object:
+- URLs expire after a set duration (typically 1 hour)
+- Each URL is signed with credentials
+- URLs grant read-only access to one specific file
+- No credentials are exposed to Quick Look or the user
+- URLs can't be used to access other files
+
+This is secure for personal use cases where you control the R2 bucket.
+</Note>
+
+## Related Services
+
+- [AWSV4Signer](/dev/services/aws-v4-signer) - Generates presigned URLs
+- [R2BrowseService](/dev/services/r2-browse-service) - Provides R2Object data
+- [ThumbnailCache](/dev/services/thumbnail-cache) - Generates list view thumbnails

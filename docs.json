@@ -71,7 +71,11 @@
               "dev/services/aws-v4-signer",
               "dev/services/keychain-service",
               "dev/services/menu-bar-manager",
-              "dev/services/update-service"
+              "dev/services/update-service",
+              "dev/services/app-updater",
+              "dev/services/quick-look-coordinator",
+              "dev/services/thumbnail-cache",
+              "dev/services/upload-history-store"
             ]
           },
           {
@@ -79,7 +83,8 @@
             "pages": [
               "dev/models/r2-credentials",
               "dev/models/r2-object",
-              "dev/models/upload-task"
+              "dev/models/upload-task",
+              "dev/models/upload-item"
             ]
           },
           {

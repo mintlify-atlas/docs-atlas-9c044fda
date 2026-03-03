@@ -56,7 +56,7 @@ Remove files and folders permanently from your R2 bucket.
     2. Select **Delete**
     3. Confirm in the dialog:
     
-    ```
+    ```text
     Delete "photo.jpg"?
     
     This will permanently remove the file from R2.
@@ -93,7 +93,7 @@ Use multi-select to delete several files at once:
   <Step title="Confirm">
     The confirmation dialog shows the count:
     
-    ```
+    ```text
     Delete 8 items?
     
     This will permanently remove the selected items
@@ -125,7 +125,7 @@ Deleting a folder removes **all files and subfolders** inside it.
   <Step title="Confirmation dialog">
     Shows a warning:
     
-    ```
+    ```text
     Delete "vacation" and all its contents?
     
     This will permanently delete the folder and all
@@ -158,7 +158,7 @@ Source:
 
 ### Example: Deleting a Nested Folder
 
-```
+```text
 vacation/
 ├── photos/
 │   ├── beach.jpg
@@ -214,7 +214,7 @@ Generate temporary download URLs for private files.
 
 Generated URLs include AWS Signature V4 query parameters:
 
-```
+```text
 https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?
   X-Amz-Algorithm=AWS4-HMAC-SHA256&
   X-Amz-Credential=<access-key>%2F<date>%2Fauto%2Fs3%2Faws4_request&

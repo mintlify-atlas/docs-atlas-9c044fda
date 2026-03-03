@@ -30,7 +30,7 @@ The drop zone at the top of the menu bar widget accepts files from Finder:
   <Step title="Drag files to the drop zone">
     The zone highlights blue when a file is hovering:
     
-    ```
+    ```text
     ┌───────────────────────┐
     │   ↓ Release to Upload │
     └───────────────────────┘
@@ -60,7 +60,7 @@ Implementation: `MenuBarView.swift:134-184` (source: `Fiaxe/Views/MenuBarView.sw
 
 While uploads are active, the widget displays a dedicated progress section:
 
-```
+```text
 ┌─────────────────────────────┐
 │ ⟳ Uploading 2 of 5…         │
 │                  [Cancel All]│
@@ -113,7 +113,7 @@ Cancelled uploads are removed from the queue immediately.
 The bottom section displays up to **25 recent uploads** with quick actions:
 
 <Frame>
-  ```
+  ```text
   RECENT UPLOADS                  [↗]
   ┌─────────────────────────────┐
   │ 📷 beach.jpg        2.4 MB   │  [🔗] [↓] [🗑]
@@ -155,7 +155,7 @@ Hover over any recent upload to reveal action buttons:
   <Accordion title="Delete" icon="trash">
     Permanently removes the file from R2. Shows a confirmation dialog:
     
-    ```
+    ```text
     Delete "photo.jpg"?
     
     This will permanently remove the file from R2
@@ -176,7 +176,7 @@ Click the **⚙️ gear icon** in the top-right to access:
 
 If you have multiple buckets configured:
 
-```
+```text
 SWITCH BUCKET
   cdn-assets        ✓
   backups
@@ -200,7 +200,7 @@ Implementation: `MenuBarView.swift:84-118` (source: `Fiaxe/Views/MenuBarView.swi
 When an upload completes, a green toast notification appears at the bottom:
 
 <Frame>
-  ```
+  ```text
   ┌─────────────────────────┐
   │ ✓ Link copied!          │
   │   photo.jpg             │

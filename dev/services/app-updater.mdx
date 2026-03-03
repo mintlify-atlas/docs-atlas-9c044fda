@@ -1,0 +1,468 @@
+---
+title: "AppUpdater"
+description: "DMG download and installation system for app updates"
+---
+
+## Overview
+
+`AppUpdater` handles the complete update installation workflow: downloading DMG files from GitHub releases, mounting the DMG, copying the new app version, and replacing the running app. It provides observable state for UI progress tracking and implements safety checks to prevent installation errors.
+
+<Info>
+  Located at: `Fiaxe/Services/AppUpdater.swift:9`
+</Info>
+
+<Note>
+**Update Workflow**
+
+The updater works in conjunction with [UpdateService](/dev/services/update-service) which fetches release metadata from GitHub. AppUpdater handles the actual download and installation.
+</Note>
+
+## Type Definition
+
+```swift
+@MainActor
+@Observable
+final class AppUpdater: NSObject, URLSessionDownloadDelegate
+```
+
+Main actor-isolated singleton that manages download and installation state.
+
+### Singleton Instance
+
+```swift
+static let shared = AppUpdater()
+```
+
+Access the shared updater instance from the main actor.
+
+## State Management
+
+The updater tracks installation progress through an observable state enum:
+
+```swift
+enum State {
+    case idle
+    case downloading(Double)   // 0.0 – 1.0
+    case downloaded(URL)
+    case installing
+    case failed(String)
+
+    var isFailed: Bool
+    var isDownloaded: Bool
+}
+
+var state: State = .idle
+```
+
+<ParamField path="idle" type="State">
+  No update operation in progress.
+</ParamField>
+
+<ParamField path="downloading" type="State">
+  Downloading DMG from GitHub. Associated value is progress (0.0 to 1.0).
+</ParamField>
+
+<ParamField path="downloaded" type="State">
+  DMG downloaded and cached, ready to install. Contains local DMG URL.
+</ParamField>
+
+<ParamField path="installing" type="State">
+  Installing update (mounting DMG, copying files, replacing app).
+</ParamField>
+
+<ParamField path="failed" type="State">
+  Update failed. Associated value contains error message.
+</ParamField>
+
+The `@Observable` macro makes state changes automatically update SwiftUI views.
+
+## Methods
+
+### install()
+
+Starts the update installation process.
+
+```swift
+func install(release: GitHubRelease)
+```
+
+<ParamField path="release" type="GitHubRelease" required>
+  GitHub release to install. Must contain a DMG asset.
+</ParamField>
+
+Internal implementation calls `download(release:)`.
+
+### download()
+
+Downloads the DMG file from the release.
+
+```swift
+func download(release: GitHubRelease)
+```
+
+<ParamField path="release" type="GitHubRelease" required>
+  Release containing the DMG download URL.
+</ParamField>
+
+#### Implementation Details
+
+```swift
+// Example from AppUpdater.swift:66-77
+func download(release: GitHubRelease) {
+    guard let dmgURL = release.dmgDownloadURL else {
+        state = .failed("No DMG asset found in this release.")
+        return
+    }
+
+    state = .downloading(0)
+
+    let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    downloadTask = session.downloadTask(with: dmgURL)
+    downloadTask?.resume()
+}
+```
+
+The method:
+1. Extracts DMG URL from release assets
+2. Sets state to `.downloading(0)`
+3. Creates a URLSession with self as delegate for progress tracking
+4. Starts the download task
+
+### cancel()
+
+Cancels an in-progress download.
+
+```swift
+func cancel()
+```
+
+Sets state back to `.idle` and cancels the download task.
+
+### installDownloaded()
+
+Installs a previously downloaded DMG.
+
+```swift
+func installDownloaded()
+```
+
+Only works when state is `.downloaded(URL)`. Calls `mountAndInstall(dmg:)` internally.
+
+## Update Capability Checks
+
+### canSelfUpdate
+
+Whether the app can update itself in place.
+
+```swift
+var canSelfUpdate: Bool { updateBlockReason == nil }
+```
+
+### updateBlockReason
+
+Reason why self-update is blocked, or `nil` if allowed.
+
+```swift
+var updateBlockReason: String?
+```
+
+#### Implementation Details
+
+```swift
+// Example from AppUpdater.swift:44-56
+var updateBlockReason: String? {
+    guard let bundlePath = Bundle.main.bundleURL.path.removingPercentEncoding else {
+        return "Could not determine the running app path."
+    }
+    if isRunningFromXcodeBuild(path: bundlePath) {
+        return "You're running from an Xcode build. Move R2 Vault into /Applications (or ~/Applications) to install updates."
+    }
+    let bundleURL = URL(fileURLWithPath: bundlePath)
+    if !FileManager.default.isWritableFile(atPath: bundleURL.deletingLastPathComponent().path) {
+        return "The app isn't in a writable location. Move it into /Applications (or ~/Applications) to install updates."
+    }
+    return nil
+}
+```
+
+Returns an error message if:
+- Running from Xcode build (`/DerivedData/` or `/Build/Products/`)
+- App isn't in a writable location (e.g., inside a mounted DMG)
+
+## URLSessionDownloadDelegate
+
+The updater implements `URLSessionDownloadDelegate` for progress tracking.
+
+### Progress Updates
+
+```swift
+func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+)
+```
+
+Called periodically during download:
+
+```swift
+// Example from AppUpdater.swift:94-104
+let progress = totalBytesExpectedToWrite > 0
+    ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+    : 0
+Task { @MainActor in
+    self.state = .downloading(progress)
+}
+```
+
+Updates state with download progress (0.0 to 1.0).
+
+### Download Completion
+
+```swift
+func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+)
+```
+
+Moves downloaded file to cache directory:
+
+```swift
+// Example from AppUpdater.swift:106-134
+let dest = cachedDMGURL
+try FileManager.default.createDirectory(
+    at: dest.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+)
+try? FileManager.default.removeItem(at: dest)
+try FileManager.default.moveItem(at: location, to: dest)
+
+Task { @MainActor in
+    self.state = .downloaded(dest)
+}
+```
+
+Cached DMG path:
+```text
+~/Library/Caches/R2Vault/R2VaultUpdate.dmg
+```
+
+## Installation Process
+
+The `mountAndInstall(dmg:)` method handles the complex installation workflow:
+
+<Steps>
+  <Step title="Mount DMG">
+    Uses `hdiutil attach` to mount the DMG and parse the mount point:
+    
+    ```swift
+    let result = try await runProcess("/usr/bin/hdiutil", args: [
+        "attach", url.path,
+        "-nobrowse", "-noautoopen",
+        "-plist"
+    ], timeout: 60)
+    ```
+    
+    Parses plist output to find mount point (e.g., `/Volumes/R2Vault`).
+  </Step>
+  
+  <Step title="Find .app Bundle">
+    Searches mounted volume for the .app bundle:
+    
+    ```swift
+    let contents = try FileManager.default.contentsOfDirectory(atPath: mountPoint)
+    guard let appName = contents.first(where: { $0.hasSuffix(".app") }) else {
+        throw UpdateError.appNotFoundInDMG
+    }
+    ```
+  </Step>
+  
+  <Step title="Copy to Temp Location">
+    Copies the new app to temp to avoid modifying the running app:
+    
+    ```swift
+    let tempApp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("r2vault_update.app")
+    _ = try await runProcess("/usr/bin/ditto", args: [sourceApp.path, tempApp.path], timeout: 120)
+    ```
+  </Step>
+  
+  <Step title="Unmount DMG">
+    Detaches the DMG after copying:
+    
+    ```swift
+    _ = try? await runProcess("/usr/bin/hdiutil", args: ["detach", mountPoint, "-quiet"], timeout: 30)
+    ```
+  </Step>
+  
+  <Step title="Schedule Post-Quit Replacement">
+    Launches a background shell script that:
+    1. Waits for the current app to quit
+    2. Replaces the old app with the new one
+    3. Removes quarantine attributes
+    4. Relaunches the app
+    
+    ```swift
+    let script = """
+    while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+    /bin/rm -rf \(escapedDest)
+    /usr/bin/ditto \(escapedTemp) \(escapedDest)
+    /usr/bin/xattr -dr com.apple.quarantine \(escapedDest) 2>/dev/null
+    /bin/rm -rf \(escapedTemp)
+    /bin/rm -f \(escapedDMG)
+    open \(escapedDest)
+    """
+    Process.launchedProcess(launchPath: "/bin/sh", arguments: ["-c", script])
+    ```
+  </Step>
+  
+  <Step title="Quit App">
+    Terminates the running app:
+    
+    ```swift
+    NSApplication.shared.terminate(nil)
+    // Force quit after 2 seconds if graceful termination fails
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        Darwin.exit(0)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Error Handling
+
+```swift
+enum UpdateError: LocalizedError {
+    case appNotFoundInDMG
+    case couldNotDetermineAppPath
+    case couldNotMountDMG
+    case shellFailed(String, Int32, String)
+    case timedOut(String, TimeInterval)
+    case notWritableInstallLocation
+}
+```
+
+<ParamField path="appNotFoundInDMG" type="UpdateError">
+  Couldn't find a .app bundle inside the mounted DMG.
+</ParamField>
+
+<ParamField path="couldNotDetermineAppPath" type="UpdateError">
+  Failed to determine the running app's file path.
+</ParamField>
+
+<ParamField path="couldNotMountDMG" type="UpdateError">
+  `hdiutil attach` failed or didn't return a mount point.
+</ParamField>
+
+<ParamField path="shellFailed" type="UpdateError">
+  A shell command exited with non-zero status. Includes command, exit code, and stderr.
+</ParamField>
+
+<ParamField path="timedOut" type="UpdateError">
+  A command exceeded its timeout duration.
+</ParamField>
+
+<ParamField path="notWritableInstallLocation" type="UpdateError">
+  The app's location isn't writable (e.g., inside a read-only DMG).
+</ParamField>
+
+## Logging
+
+The updater logs all operations to a file:
+
+```text
+~/Library/Logs/R2VaultUpdater.log
+```
+
+Log format:
+```text
+[2024-03-15T12:30:45Z] Installing update from DMG: /path/to/update.dmg
+[2024-03-15T12:30:47Z] Mounted DMG at: /Volumes/R2Vault
+[2024-03-15T12:30:48Z] Found app in DMG: /Volumes/R2Vault/R2 Vault.app
+[2024-03-15T12:30:50Z] Install destination: /Applications/R2 Vault.app
+[2024-03-15T12:30:52Z] Copied to temp: /tmp/r2vault_update.app
+[2024-03-15T12:30:53Z] Launching post-quit install script.
+```
+
+Useful for debugging installation failures.
+
+## Usage Example
+
+```swift
+import SwiftUI
+
+struct UpdaterView: View {
+    @State private var updater = AppUpdater.shared
+    
+    var body: some View {
+        VStack {
+            switch updater.state {
+            case .idle:
+                Text("Ready to update")
+                
+            case .downloading(let progress):
+                ProgressView(value: progress) {
+                    Text("Downloading: \(Int(progress * 100))%")
+                }
+                Button("Cancel") {
+                    updater.cancel()
+                }
+                
+            case .downloaded:
+                Text("Update ready to install")
+                Button("Install Now") {
+                    updater.installDownloaded()
+                }
+                .buttonStyle(.borderedProminent)
+                
+            case .installing:
+                ProgressView("Installing...")
+                Text("The app will restart automatically")
+                    .font(.caption)
+                
+            case .failed(let message):
+                Text("Update failed: \(message)")
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding()
+    }
+}
+```
+
+## Security Considerations
+
+<Warning>
+**Update Security**
+
+The current implementation:
+- Uses HTTPS for GitHub downloads (transport security)
+- Removes quarantine attributes (`com.apple.quarantine`)
+- Does NOT verify code signatures
+- Does NOT verify DMG checksums
+
+For production apps, consider:
+- Verifying DMG checksums from release notes
+- Checking code signatures before installation
+- Using Apple's Sparkle framework
+- Implementing delta updates
+</Warning>
+
+## App Store Distribution
+
+<Note>
+If distributing via the Mac App Store:
+- Remove the auto-update system entirely
+- App Store handles all updates automatically
+- Self-updating violates App Store guidelines
+- Can still check GitHub API to notify users
+</Note>
+
+## Related Services
+
+- [UpdateService](/dev/services/update-service) - Fetches release metadata from GitHub
+- [MenuBarManager](/dev/services/menu-bar-manager) - Can display update notifications

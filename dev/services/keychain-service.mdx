@@ -3,6 +3,20 @@ title: "KeychainService"
 description: "Credential storage service using UserDefaults"
 ---
 
+<Warning>
+**NOT Using macOS Keychain**
+
+Despite its name, this service **does not** use the macOS Keychain. Credentials are stored in **plain text** in UserDefaults without encryption. This is a deliberate design choice for a personal single-user tool, prioritizing simplicity over maximum security.
+
+**Security implications:**
+- Credentials are stored unencrypted
+- Accessible to other processes with UserDefaults access
+- Included in Time Machine backups
+- Visible in UserDefaults plist files
+
+For production applications handling sensitive credentials, consider using the system Keychain (Security framework) instead.
+</Warning>
+
 ## Overview
 
 `KeychainService` provides persistent storage for R2 credentials. Despite its name, this implementation uses `UserDefaults` rather than the system Keychain, which is appropriate for a personal single-user tool where credentials are stored on the user's own machine.
@@ -10,10 +24,6 @@ description: "Credential storage service using UserDefaults"
 <Info>
   Located at: `Fiaxe/Services/KeychainService.swift:6`
 </Info>
-
-<Warning>
-  This service stores credentials in plain text in UserDefaults. For production applications handling sensitive credentials for multiple users, consider using the system Keychain (Security framework) or encrypted storage.
-</Warning>
 
 ## Type Definition
 
@@ -185,7 +195,7 @@ try KeychainService.deleteAll()
 
 The `loadAll()` method includes backward compatibility:
 
-```swift
+```json
 // Old format (single credential)
 {
   "accountId": "...",

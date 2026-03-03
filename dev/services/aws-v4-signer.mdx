@@ -409,7 +409,7 @@ The implementation follows the official AWS Signature Version 4 specification:
 <Steps>
   <Step title="Canonical Request">
     Normalize the HTTP request into a canonical format:
-    ```
+    ```text
     HTTPMethod\n
     CanonicalURI\n
     CanonicalQueryString\n
@@ -421,7 +421,7 @@ The implementation follows the official AWS Signature Version 4 specification:
   
   <Step title="String to Sign">
     Create a string that includes the algorithm, timestamp, credential scope, and hashed canonical request:
-    ```
+    ```text
     AWS4-HMAC-SHA256\n
     Timestamp\n
     CredentialScope\n
@@ -431,7 +431,7 @@ The implementation follows the official AWS Signature Version 4 specification:
   
   <Step title="Signing Key">
     Derive a signing key through a series of HMAC operations:
-    ```
+    ```text
     kSecret = HMAC("AWS4" + SecretKey, Date)
     kRegion = HMAC(kSecret, Region)
     kService = HMAC(kRegion, Service)
@@ -441,14 +441,14 @@ The implementation follows the official AWS Signature Version 4 specification:
   
   <Step title="Signature">
     Calculate the signature by HMAC-SHA256 of the string to sign with the signing key:
-    ```
+    ```text
     Signature = HMAC-SHA256(kSigning, StringToSign)
     ```
   </Step>
   
   <Step title="Authorization Header">
     Add the Authorization header to the request:
-    ```
+    ```text
     AWS4-HMAC-SHA256 Credential=AccessKeyId/CredentialScope,
     SignedHeaders=SignedHeaders,
     Signature=Signature
@@ -460,7 +460,7 @@ The implementation follows the official AWS Signature Version 4 specification:
 
 <Note>
   R2 uses the region `"auto"` instead of standard AWS regions like `"us-east-1"`. The endpoint format is:
-  ```
+  ```text
   https://{accountId}.r2.cloudflarestorage.com/{bucketName}/{key}
   ```
 </Note>

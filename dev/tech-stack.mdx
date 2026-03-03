@@ -9,7 +9,7 @@ description: Complete overview of frameworks, APIs, and dependencies used in r2V
   <Card title="Swift 6" icon="swift">
     Modern Swift with strict concurrency checking
   </Card>
-  <Card title="macOS 14.0+" icon="apple">
+  <Card title="macOS 15.0+" icon="apple">
     Leverages latest macOS APIs and SwiftUI features
   </Card>
   <Card title="Xcode 16+" icon="hammer">
@@ -235,7 +235,7 @@ Cloudflare R2 implements the AWS S3 API:
 <AccordionGroup>
   <Accordion title="PUT Object">
     Upload a file:
-    ```
+    ```text
     PUT /{bucket}/{key}
     Content-Type: image/jpeg
     Content-Length: 123456
@@ -245,7 +245,7 @@ Cloudflare R2 implements the AWS S3 API:
   
   <Accordion title="ListObjectsV2">
     List files and folders:
-    ```
+    ```text
     GET /{bucket}?list-type=2&prefix=photos/&delimiter=/
     Authorization: AWS4-HMAC-SHA256 Credential=...
     ```
@@ -255,7 +255,7 @@ Cloudflare R2 implements the AWS S3 API:
   
   <Accordion title="DELETE Object">
     Delete a file:
-    ```
+    ```text
     DELETE /{bucket}/{key}
     Authorization: AWS4-HMAC-SHA256 Credential=...
     ```
@@ -263,7 +263,7 @@ Cloudflare R2 implements the AWS S3 API:
   
   <Accordion title="HEAD Bucket">
     Test connection:
-    ```
+    ```text
     HEAD /{bucket}
     Authorization: AWS4-HMAC-SHA256 Credential=...
     ```

@@ -1,0 +1,333 @@
+---
+title: "UploadItem"
+description: "Model representing a completed upload entry in history"
+---
+
+## Overview
+
+`UploadItem` represents a single completed upload in the upload history. It stores metadata about the uploaded file including its name, size, R2 key, upload date, and public URL. The model conforms to `Identifiable` for SwiftUI list display and `Codable` for JSON persistence.
+
+<Info>
+  Located at: `Fiaxe/Models/UploadItem.swift:4`
+</Info>
+
+## Type Definition
+
+```swift
+struct UploadItem: Identifiable, Codable, Sendable
+```
+
+A value type that conforms to:
+- `Identifiable` - For use in SwiftUI lists with stable identity
+- `Codable` - For JSON serialization to UserDefaults
+- `Sendable` - For safe passing across actor boundaries
+
+## Properties
+
+### id
+
+Unique identifier for the upload item.
+
+```swift
+let id: UUID
+```
+
+<ParamField path="id" type="UUID">
+  Auto-generated UUID for stable identity in SwiftUI lists.
+</ParamField>
+
+### fileName
+
+Original name of the uploaded file.
+
+```swift
+let fileName: String
+```
+
+<ParamField path="fileName" type="String">
+  The original filename (e.g., `"photo.jpg"`, `"document.pdf"`).
+</ParamField>
+
+### fileSize
+
+Size of the uploaded file in bytes.
+
+```swift
+let fileSize: Int64
+```
+
+<ParamField path="fileSize" type="Int64">
+  File size in bytes. Used for displaying formatted size to users.
+</ParamField>
+
+### r2Key
+
+The object key used in R2 storage.
+
+```swift
+let r2Key: String
+```
+
+<ParamField path="r2Key" type="String">
+  The full R2 object key (e.g., `"abc12345-photo.jpg"`, `"uploads/2024/document.pdf"`).
+</ParamField>
+
+### uploadDate
+
+Timestamp when the upload completed.
+
+```swift
+let uploadDate: Date
+```
+
+<ParamField path="uploadDate" type="Date">
+  The date and time when the upload completed. Automatically set to current time during initialization.
+</ParamField>
+
+<Note>
+**Property Name**
+
+The property is named `uploadDate`, not `timestamp`. This matches the actual source code implementation.
+</Note>
+
+### publicURL
+
+Public URL for accessing the uploaded file.
+
+```swift
+let publicURL: URL
+```
+
+<ParamField path="publicURL" type="URL">
+  The public URL where the file can be accessed (e.g., custom domain URL or R2 public URL).
+</ParamField>
+
+## Computed Properties
+
+### formattedFileSize
+
+Human-readable file size string.
+
+```swift
+var formattedFileSize: String {
+    ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+}
+```
+
+**Returns:** Formatted string like `"2.1 MB"`, `"456 KB"`, `"1.2 GB"`.
+
+Uses Foundation's `ByteCountFormatter` for localized, user-friendly formatting.
+
+## Initializer
+
+Creates a new upload item with automatic ID and timestamp generation.
+
+```swift
+init(fileName: String, fileSize: Int64, r2Key: String, publicURL: URL)
+```
+
+<ParamField path="fileName" type="String" required>
+  Original filename of the uploaded file.
+</ParamField>
+
+<ParamField path="fileSize" type="Int64" required>
+  Size of the file in bytes.
+</ParamField>
+
+<ParamField path="r2Key" type="String" required>
+  The R2 object key where the file is stored.
+</ParamField>
+
+<ParamField path="publicURL" type="URL" required>
+  Public URL for accessing the uploaded file.
+</ParamField>
+
+### Implementation Details
+
+```swift
+// Example from UploadItem.swift:12-19
+init(fileName: String, fileSize: Int64, r2Key: String, publicURL: URL) {
+    self.id = UUID()
+    self.fileName = fileName
+    self.fileSize = fileSize
+    self.r2Key = r2Key
+    self.uploadDate = Date()
+    self.publicURL = publicURL
+}
+```
+
+The initializer:
+1. Generates a new UUID for the `id`
+2. Stores the provided parameters
+3. Sets `uploadDate` to the current date/time
+
+## Usage Example
+
+```swift
+import Foundation
+
+// Create an upload item after successful upload
+let uploadItem = UploadItem(
+    fileName: "vacation-photo.jpg",
+    fileSize: 2_048_576,  // 2 MB
+    r2Key: "abc12345-vacation-photo.jpg",
+    publicURL: URL(string: "https://pub.example.com/abc12345-vacation-photo.jpg")!
+)
+
+print(uploadItem.id)  // UUID: 123e4567-e89b-12d3-a456-426614174000
+print(uploadItem.formattedFileSize)  // "2 MB"
+print(uploadItem.uploadDate)  // 2024-03-15 12:30:45
+```
+
+### SwiftUI List Integration
+
+```swift
+import SwiftUI
+
+struct UploadHistoryView: View {
+    let items: [UploadItem]
+    
+    var body: some View {
+        List(items) { item in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.fileName)
+                    .font(.headline)
+                
+                HStack {
+                    Text(item.formattedFileSize)
+                    Text("•")
+                    Text(item.uploadDate.formatted(date: .abbreviated, time: .shortened))
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+                
+                Text(item.publicURL.absoluteString)
+                    .font(.caption2)
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+```
+
+### Adding to History Store
+
+```swift
+// After successful upload
+let fileSize = try FileManager.default.attributesOfItem(
+    atPath: fileURL.path
+)[.size] as! Int64
+
+let publicURL = credentials.customDomain ?? credentials.endpoint
+    .appendingPathComponent(credentials.bucketName)
+    .appendingPathComponent(generatedKey)
+
+let uploadItem = UploadItem(
+    fileName: fileURL.lastPathComponent,
+    fileSize: fileSize,
+    r2Key: generatedKey,
+    publicURL: publicURL
+)
+
+uploadHistoryStore.add(uploadItem)
+```
+
+## JSON Encoding
+
+The model automatically encodes to JSON via `Codable`:
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "fileName": "vacation-photo.jpg",
+  "fileSize": 2048576,
+  "r2Key": "abc12345-vacation-photo.jpg",
+  "uploadDate": "2024-03-15T12:30:45Z",
+  "publicURL": "https://pub.example.com/abc12345-vacation-photo.jpg"
+}
+```
+
+Used by [UploadHistoryStore](/dev/services/upload-history-store) for persistence.
+
+## Sendable Conformance
+
+<Tip>
+**Thread Safety**
+
+The `Sendable` conformance allows passing `UploadItem` across actor boundaries:
+
+```swift
+Task.detached {
+    let item = UploadItem(...)  // Created on background
+    await MainActor.run {
+        historyStore.add(item)  // Safely passed to main actor
+    }
+}
+```
+
+All properties are value types or immutable, making this safe.
+</Tip>
+
+## Identifiable Conformance
+
+The `id` property satisfies `Identifiable` for SwiftUI:
+
+```swift
+List(uploadItems) { item in  // ✓ Works because UploadItem: Identifiable
+    UploadHistoryRow(item: item)
+}
+```
+
+SwiftUI uses the `id` to:
+- Track items across updates
+- Animate insertions/deletions
+- Maintain selection state
+
+## File Size Formatting Examples
+
+```swift
+let examples = [
+    (bytes: 1_024, formatted: "1 KB"),
+    (bytes: 1_048_576, formatted: "1 MB"),
+    (bytes: 2_500_000, formatted: "2.4 MB"),
+    (bytes: 1_073_741_824, formatted: "1 GB"),
+    (bytes: 500, formatted: "500 bytes")
+]
+
+for example in examples {
+    let item = UploadItem(
+        fileName: "test.file",
+        fileSize: example.bytes,
+        r2Key: "key",
+        publicURL: URL(string: "https://example.com")!
+    )
+    print(item.formattedFileSize)  // Matches example.formatted
+}
+```
+
+## Design Considerations
+
+<AccordionGroup>
+  <Accordion title="Why UUID instead of timestamp for ID?">
+    UUIDs provide guaranteed uniqueness even if multiple uploads complete in the same millisecond. Timestamps could collide.
+  </Accordion>
+  
+  <Accordion title="Why store publicURL instead of regenerating?">
+    The URL may depend on custom domain settings that could change. Storing ensures the URL remains valid even if configuration changes.
+  </Accordion>
+  
+  <Accordion title="Why Int64 for fileSize?">
+    Supports files up to 8 exabytes. Int would be limited to 2 GB on some architectures.
+  </Accordion>
+  
+  <Accordion title="Why immutable properties?">
+    Upload history entries represent completed events that shouldn't change. Immutability prevents accidental modification.
+  </Accordion>
+</AccordionGroup>
+
+## Related Services
+
+- [UploadHistoryStore](/dev/services/upload-history-store) - Manages collections of UploadItems
+- [R2UploadService](/dev/services/r2-upload-service) - Creates UploadItems after successful uploads
+- [FileUploadTask](/dev/models/upload-task) - Represents in-progress uploads
